@@ -58,13 +58,25 @@ export interface DayNormal {
  * Normál pro kalendářní den: všechny hodnoty v okně ±window dní kolem daného dne
  * v letech normálového období (výchozí 1991–2020, ±7 dní → až 30 × 15 hodnot).
  */
-export function dayNormal(
+export interface WindowOptions {
+  from?: number
+  to?: number
+  window?: number
+}
+
+export function dayNormal(s: DailySeries, v: ClimVar, month: number, day: number, opts: WindowOptions = {}): DayNormal {
+  const { values, years } = dayWindowValues(s, v, month, day, opts)
+  return { mean: mean(values), p10: percentile(values, 10), p90: percentile(values, 90), n: values.length, years }
+}
+
+/** Všechny hodnoty v okně ±window dní kolem kalendářního dne v letech from–to (+ počet let s daty) */
+export function dayWindowValues(
   s: DailySeries,
   v: ClimVar,
   month: number,
   day: number,
-  { from = NORMAL_PERIOD.from, to = NORMAL_PERIOD.to, window = 7 } = {},
-): DayNormal {
+  { from = NORMAL_PERIOD.from, to = NORMAL_PERIOD.to, window = 7 }: WindowOptions = {},
+): { values: number[]; years: number } {
   const values: number[] = []
   let years = 0
   for (let y = from; y <= to; y++) {
@@ -80,7 +92,7 @@ export function dayNormal(
     }
     if (any) years++
   }
-  return { mean: mean(values), p10: percentile(values, 10), p90: percentile(values, 90), n: values.length, years }
+  return { values, years }
 }
 
 export interface Extreme {

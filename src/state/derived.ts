@@ -25,8 +25,12 @@ export function useNow(intervalMs = 30_000): number {
   return now
 }
 
-/** Měření stanice považujeme za aktuální, pokud není starší než 90 minut */
-export const STATION_FRESH_MS = 90 * MINUTE
+/**
+ * Měření stanice považujeme za aktuální, pokud není starší než 150 minut.
+ * Běžné zpoždění: soubor ČHMÚ končí :50 předchozí hodiny a vychází v :03, Action běží v :12
+ * (+ zpoždění plánovače až 30 min) a raw.githubusercontent drží cache 5 min → až ~2 h.
+ */
+export const STATION_FRESH_MS = 150 * MINUTE
 
 export function isStationFresh(st: StationNow | undefined, now: number): boolean {
   return !!st?.last && st.last.T != null && now - st.last.t <= STATION_FRESH_MS

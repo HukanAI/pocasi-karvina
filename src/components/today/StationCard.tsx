@@ -75,7 +75,7 @@ export function StationCard() {
       title={`Naměřeno · ČHMÚ ${CHMI_STATION.name}`}
       subtitle={`${formatTime(last.t)} (${formatAgo(last.t, now)}) · ${CHMI_STATION.elevation} m n. m.`}
     >
-      {old && <p className="mb-2 rounded-xl bg-amber-500/15 px-3 py-1.5 text-xs">Poslední měření je starší než 90 minut – ČHMÚ data zatím nezveřejnil.</p>}
+      {old && <p className="mb-2 rounded-xl bg-amber-500/15 px-3 py-1.5 text-xs">Poslední měření je starší než {STATION_FRESH_MS / 60_000} minut – ČHMÚ nebo automatická aktualizace mají zpoždění.</p>}
       <div className="grid grid-cols-3 gap-x-3 gap-y-3">
         <Stat label="Teplota" value={temp(last.T)} sub={last.TPM != null ? `u země ${temp(last.TPM)}` : undefined} />
         <Stat label="Vlhkost" value={pct(last.H)} />

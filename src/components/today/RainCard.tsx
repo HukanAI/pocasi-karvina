@@ -31,8 +31,9 @@ function Big({ ms }: { ms: number }) {
 const srcLabel = (src: 'station' | 'model') => (src === 'station' ? `měřeno ČHMÚ ${CHMI_STATION.name}` : 'odhad modelu (měření za tuto dobu ještě není zveřejněno)')
 
 export function RainCard() {
+  // Stav deště (tisíce vzorků) stačí přepočítat jednou za minutu; sekundy tiká jen zobrazení
   const now = useNow(1000)
-  const rain = useRain(now)
+  const rain = useRain(useNow(60_000))
   if (rain.isLoading && rain.state.kind === 'unknown') return <LoadingCard title="Bez deště" lines={2} />
   const { state, next, expectedEnd } = rain
   const thresholdNote = rain.minTotal > 0.1 ? ` Počítají se jen deště s úhrnem aspoň ${num(rain.minTotal, 1)} mm (lze změnit v nastavení).` : ''

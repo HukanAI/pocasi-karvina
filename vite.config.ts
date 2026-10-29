@@ -44,10 +44,11 @@ export default defineConfig({
         navigateFallback: `${BASE}index.html`,
         runtimeCaching: [
           {
-            // Předpočítaná data z data větve (klimatologie, měření ČHMÚ, výstrahy)
+            // Předpočítaná data z data větve (měření ČHMÚ, výstrahy, klimatologie).
+            // NetworkFirst: vždy nejčerstvější data, cache jen když síť nedopoví (StaleWhileRevalidate by vracel starou verzi)
             urlPattern: ({ url }) => url.hostname === 'raw.githubusercontent.com',
-            handler: 'StaleWhileRevalidate',
-            options: { cacheName: 'data-branch', expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 } },
+            handler: 'NetworkFirst',
+            options: { cacheName: 'data-branch', networkTimeoutSeconds: 8, expiration: { maxEntries: 20, maxAgeSeconds: 60 * 60 * 24 * 30 } },
           },
           {
             // Podkladová mapa a radarové dlaždice

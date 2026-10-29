@@ -62,7 +62,7 @@ export function Hero() {
       <p className="mt-1 text-[11px] text-faint">
         {fresh
           ? `Teplota naměřena na stanici ČHMÚ Karviná v ${formatTime(st.data!.last!.t)} (${formatAgo(st.data!.last!.t, now)})`
-          : `Teplota z modelu Open-Meteo (${formatTime(f.data.currentTime)})${st.data?.last ? '; měření ČHMÚ není aktuální' : ''}`}
+          : `Teplota z modelu Open-Meteo (${formatTime(f.data.currentTime)})${st.data?.last ? `; poslední měření ČHMÚ je z ${formatTime(st.data.last.t)}` : ''}`}
       </p>
       {anomaly != null && (
         <Pill

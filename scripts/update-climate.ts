@@ -96,14 +96,18 @@ async function updateStation(full: boolean) {
     log('historical: řádků', rows.length, 'použito', applyChmiRows(m, rows))
   }
 
-  // Letošní rok z recent/: dokončené měsíce v podsložkách MM/, aktuální (a případně minulý) měsíc v kořeni
+  // Letošní rok z recent/: dokončené měsíce v podsložkách MM/, aktuální (a minulý) měsíc v kořeni.
+  // Minulý měsíc se bere i přes přelom roku – data za 31. 12. vycházejí až 1. 1.
   const today = localDateKey(Date.now())
   const year = Number(today.slice(0, 4))
   const month = Number(today.slice(5, 7))
   const pad = (n: number) => String(n).padStart(2, '0')
-  const months = doFull ? Array.from({ length: month }, (_, i) => i + 1) : [Math.max(1, month - 1), month]
-  for (const mo of [...new Set(months)]) {
-    for (const path of [`recent/data/daily/${pad(mo)}/dly-${WSI}-${year}${pad(mo)}.json`, `recent/data/daily/dly-${WSI}-${year}${pad(mo)}.json`]) {
+  const prev: [number, number] = month === 1 ? [year - 1, 12] : [year, month - 1]
+  const months: [number, number][] = doFull ? Array.from({ length: month }, (_, i) => [year, i + 1] as [number, number]) : []
+  if (!months.some(([y, m]) => y === prev[0] && m === prev[1])) months.unshift(prev)
+  if (!months.some(([y, m]) => y === year && m === month)) months.push([year, month])
+  for (const [y, mo] of months) {
+    for (const path of [`recent/data/daily/${pad(mo)}/dly-${WSI}-${y}${pad(mo)}.json`, `recent/data/daily/dly-${WSI}-${y}${pad(mo)}.json`]) {
       const rows = await fetchChmi(path)
       if (rows) log(path, 'použito', applyChmiRows(m, rows))
     }
@@ -158,8 +162,19 @@ async function updateEra5(full: boolean) {
   if (doFull) touchMeta('era5Full')
 }
 
+/** Je potřeba aktualizovat? (chybí soubor nebo je starší než 20 h) – odolné vůči vynechaným během plánovače */
+function isStale(): boolean {
+  const meta = readJson<MetaFile>('meta.json') ?? {}
+  const age = (iso?: string) => (iso ? Date.now() - Date.parse(iso) : Infinity)
+  return !readJson('station-daily.json') || !readJson('era5-daily.json') || age(meta.stationDaily) > 20 * 3_600_000 || age(meta.era5) > 20 * 3_600_000
+}
+
 async function main() {
   const full = process.argv.includes('--full')
+  if (!full && process.argv.includes('--if-stale') && !isStale()) {
+    log('Klimatické řady jsou aktuální (mladší než 20 h), přeskakuji.')
+    return
+  }
   let failed = false
   for (const [name, fn] of [
     ['stanice', updateStation],

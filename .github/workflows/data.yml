@@ -6,6 +6,8 @@ on:
   schedule:
     # ČHMÚ zveřejňuje 10min data kolem :03, proto běh v :12
     - cron: '12 * * * *'
+    # Ranní souhrn v 6:30 místního času (4:32 UTC v létě, 5:32 UTC v zimě; skript si čas ověří sám)
+    - cron: '32 4,5 * * *'
   workflow_dispatch:
     inputs:
       full:
@@ -36,11 +38,19 @@ jobs:
 
       - name: Načtení větve data
         run: |
-          if git ls-remote --exit-code --heads origin data >/dev/null; then
+          # Exit kód 2 = větev neexistuje; jiná chyba (síť) musí běh zastavit, jinak by se větev přepsala prázdnými daty
+          set +e
+          git ls-remote --exit-code --heads origin data >/dev/null
+          code=$?
+          set -e
+          if [ "$code" = "0" ]; then
             git clone --depth 1 --branch data "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data-branch
-          else
+          elif [ "$code" = "2" ]; then
             echo "Větev data zatím neexistuje, vytvořím ji."
             mkdir -p data-branch
+          else
+            echo "::error::Nelze ověřit větev data (kód $code)"
+            exit 1
           fi
 
       - name: Měření ČHMÚ Karviná
@@ -51,15 +61,13 @@ jobs:
         continue-on-error: true
         run: node scripts/fetch-warnings.ts
 
-      - name: Klimatické řady (jednou denně nebo na vyžádání)
+      - name: Klimatické řady (když jsou starší než 20 h nebo na vyžádání)
         continue-on-error: true
         run: |
           if [ "${{ inputs.full }}" = "true" ]; then
             node scripts/update-climate.ts --full
-          elif [ "$(date -u +%H)" = "03" ] || [ ! -f data-branch/station-daily.json ] || [ ! -f data-branch/era5-daily.json ]; then
-            node scripts/update-climate.ts
           else
-            echo "Přeskočeno (běží denně ve 3 h UTC)."
+            node scripts/update-climate.ts --if-stale
           fi
 
       - name: Upozornění (ntfy)
@@ -86,12 +94,11 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
           ls -la
 
-      - name: Udržení plánovače v chodu (1. den v měsíci)
+      - name: Udržení plánovače v chodu
         if: github.event_name == 'schedule'
+        continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          # GitHub vypíná plánované workflow po 60 dnech bez aktivity; opětovné povolení odpočet resetuje
-          if [ "$(date -u +%d)" = "01" ] && [ "$(date -u +%H)" = "03" ]; then
-            gh api -X PUT "repos/${{ github.repository }}/actions/workflows/data.yml/enable" && echo "Plánovač obnoven."
-          fi
+        # GitHub vypíná plánované workflow po 60 dnech bez aktivity; opětovné povolení odpočet resetuje.
+        # Volá se při každém plánovaném běhu, aby nezáleželo na tom, který běh plánovač vynechá.
+        run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/data.yml/enable" && echo "Plánovač obnoven."

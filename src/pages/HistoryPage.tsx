@@ -13,6 +13,7 @@ import {
   dayHistory,
   dayNormal,
   dayRecords,
+  dayWindowValues,
   drySpells,
   monthlyNormals,
   monthStats,
@@ -66,7 +67,7 @@ export default function HistoryPage() {
       ) : !q.data ? (
         <LoadingCard title="Načítám historická data…" lines={6} />
       ) : (
-        <HistoryContent s={q.data} />
+        <HistoryContent key={src} s={q.data} />
       )}
     </div>
   )
@@ -102,14 +103,7 @@ function TodayVsNormal({ s, today, month, day, year }: { s: DailySeries; today: 
   const fc = di >= 0 && f.data ? { tmax: f.data.daily.temperature_2m_max[di], tmin: f.data.daily.temperature_2m_min[di], tmean: f.data.daily.temperature_2m_mean[di] } : null
 
   // Percentil dnešního maxima mezi všemi maximy v okně ±7 dní normálového období
-  const window: number[] = []
-  for (let y = NORMAL_PERIOD.from; y <= NORMAL_PERIOD.to; y++) {
-    const center = `${y}-${String(month).padStart(2, '0')}-${String(month === 2 && day === 29 ? 28 : day).padStart(2, '0')}`
-    for (let o = -7; o <= 7; o++) {
-      const v = valueAt(s, 'tmax', addDays(center, o))
-      if (v != null) window.push(v)
-    }
-  }
+  const window = dayWindowValues(s, 'tmax', month, day).values
   const rank = fc?.tmax != null ? percentileRank(window, fc.tmax) : null
 
   const yMax = valueAt(s, 'tmax', yesterday)
