@@ -1,6 +1,7 @@
 import { lazy, Suspense, useEffect, useState } from 'react'
 import { Link, Route, Routes, useLocation } from 'react-router-dom'
 import { BottomNav } from './components/BottomNav.tsx'
+import { ErrorBoundary } from './components/ErrorBoundary.tsx'
 import { LoadingCard } from './components/ui.tsx'
 import { WeatherBackground } from './components/WeatherBackground.tsx'
 import { LOCATION } from './config.ts'
@@ -86,6 +87,7 @@ export default function App() {
       <div className="relative z-10 min-h-dvh pb-[calc(76px+env(safe-area-inset-bottom))]">
         <Header now={now} />
         <main className="mx-auto max-w-xl px-4">
+          <ErrorBoundary key={pathname}>
           <Suspense fallback={<LoadingCard lines={5} />}>
             <Routes>
               <Route path="/" element={<TodayPage />} />
@@ -97,6 +99,7 @@ export default function App() {
               <Route path="*" element={<TodayPage />} />
             </Routes>
           </Suspense>
+          </ErrorBoundary>
         </main>
       </div>
       <BottomNav />

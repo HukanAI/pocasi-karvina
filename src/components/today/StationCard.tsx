@@ -40,7 +40,7 @@ export function StationCard() {
 
   const option: EChartsOption = {
     ...baseOption(c),
-    grid: { left: 4, right: 4, top: 16, bottom: 4, containLabel: true },
+    grid: { left: 4, right: 4, top: 16, bottom: 4, outerBoundsMode: 'same', outerBoundsContain: 'axisLabel' },
     tooltip: {
       ...(baseOption(c).tooltip as object),
       valueFormatter: (v) => (typeof v === 'number' ? num(v, 1) : String(v)),

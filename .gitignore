@@ -26,3 +26,6 @@ dist-ssr
 # Lokální výstup datových skriptů (v produkci je to větev data)
 data-out
 public/dev-data
+
+# Lokální nastavení nástrojů
+.claude/

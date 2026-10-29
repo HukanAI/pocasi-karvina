@@ -7,8 +7,12 @@ import { VitePWA } from 'vite-plugin-pwa'
 const BASE = '/pocasi-karvina/'
 
 // https://vite.dev/config/
+// Verze = datum sestavení (zobrazuje se v nastavení)
+const VERSION = new Date().toISOString().slice(0, 16).replace('T', ' ')
+
 export default defineConfig({
   base: BASE,
+  define: { __APP_VERSION__: JSON.stringify(VERSION) },
   plugins: [
     react(),
     tailwindcss(),
@@ -48,7 +52,7 @@ export default defineConfig({
           {
             // Podkladová mapa a radarové dlaždice
             urlPattern: ({ url }) =>
-              url.hostname.endsWith('basemaps.cartocdn.com') || url.hostname === 'tilecache.rainviewer.com',
+              url.hostname === 'server.arcgisonline.com' || url.hostname === 'tilecache.rainviewer.com',
             handler: 'CacheFirst',
             options: { cacheName: 'map-tiles', expiration: { maxEntries: 400, maxAgeSeconds: 60 * 60 * 24 * 7 } },
           },
@@ -56,6 +60,10 @@ export default defineConfig({
       },
     }),
   ],
+  optimizeDeps: {
+    // Líně načítané knihovny předoptimalizovat hned, jinak je dev server objeví až za běhu (chyba 504)
+    include: ['leaflet', 'suncalc', 'echarts/core', 'echarts/charts', 'echarts/components', 'echarts/renderers'],
+  },
   build: {
     // ECharts (~700 kB) je záměrně samostatný líně načítaný kus
     chunkSizeWarningLimit: 800,

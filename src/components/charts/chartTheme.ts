@@ -52,7 +52,7 @@ export function baseOption(c: ChartColors): EChartsOption {
   return {
     animationDuration: 500,
     textStyle: { fontFamily: 'Inter Variable, system-ui, sans-serif', color: c.text },
-    grid: { left: 8, right: 8, top: 24, bottom: 8, containLabel: true },
+    grid: { left: 8, right: 8, top: 24, bottom: 8, outerBoundsMode: 'same', outerBoundsContain: 'axisLabel' },
     tooltip: {
       trigger: 'axis',
       confine: true,
