@@ -1,13 +1,13 @@
-# Každou hodinu: měření ČHMÚ, výstrahy, upozornění (ntfy); jednou denně klimatické řady.
+# Každých 10 minut: měření ČHMÚ, výstrahy, upozornění (ntfy); jednou denně klimatické řady.
 # Výsledky se ukládají do větve `data` (jediný commit, přepisuje se – historie neroste).
 name: Aktualizace dat
 
 on:
   schedule:
-    # ČHMÚ zveřejňuje 10min data kolem :03, proto běh v :12
-    - cron: '12 * * * *'
-    # Ranní souhrn v 6:30 místního času (4:32 UTC v létě, 5:32 UTC v zimě; skript si čas ověří sám)
-    - cron: '32 4,5 * * *'
+    # Každých 10 minut: plánovač GitHubu běhy často vynechává (ověřeno: 1 z 9 hodinových běhů),
+    # častější plán dává víc příležitostí. Skripty jsou idempotentní (upozornění se neopakují,
+    # klimatické řady se stahují jen jednou denně). ČHMÚ zveřejňuje 10min data kolem :03 každé hodiny.
+    - cron: '2-59/10 * * * *'
   workflow_dispatch:
     inputs:
       full:

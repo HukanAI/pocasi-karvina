@@ -120,7 +120,7 @@ export default function SettingsPage() {
         ) : (
           <p className="text-sm text-muted">{meta.isError ? 'Stav dat se nepodařilo načíst.' : 'Načítám…'}</p>
         )}
-        <SourceNote>Data ČHMÚ a výstrahy obnovuje GitHub Actions každou hodinu (zpoždění plánovače bývá 5–30 min).</SourceNote>
+        <SourceNote>Data ČHMÚ a výstrahy obnovuje GitHub Actions každých 10 minut (plánovač GitHubu ale běhy občas vynechává).</SourceNote>
       </Card>
 
       <p className="px-2 text-center text-[11px] text-faint">

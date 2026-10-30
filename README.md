@@ -31,7 +31,7 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 main ──(Actions: build)──► GitHub Pages (PWA) ──► Open-Meteo, RainViewer (přímo z prohlížeče)
                                    │
                                    └──► raw.githubusercontent.com/…/data/*.json
-data ◄──(Actions: každou hodinu)── scripts/*.ts ──► ntfy.sh ──► telefon
+data ◄──(Actions: každých 10 min)── scripts/*.ts ──► ntfy.sh ──► telefon
 ```
 
 ČHMÚ ani MeteoAlarm nepovolují čtení přímo z prohlížeče (CORS), proto je stahuje
@@ -39,12 +39,12 @@ GitHub Action (`.github/workflows/data.yml`) do větve `data`:
 
 | Soubor | Obsah | Obnova |
 | --- | --- | --- |
-| `station-now.json` | poslední měření ČHMÚ, 48h průběh, souhrn dne | každou hodinu |
-| `station-sra10.json` | 10min srážky za ~120 dní (čas od posledního deště) | každou hodinu |
+| `station-now.json` | poslední měření ČHMÚ, 48h průběh, souhrn dne | každých 10 min |
+| `station-sra10.json` | 10min srážky za ~120 dní (čas od posledního deště) | každých 10 min |
 | `station-daily.json` | denní řada ČHMÚ od 1877 | denně |
 | `era5-daily.json` | denní řada ERA5 od 1940 | denně |
-| `warnings.json` | platné výstrahy pro ORP Karviná | každou hodinu |
-| `alerts-state.json` | odeslaná upozornění (aby nechodila dvakrát) | každou hodinu |
+| `warnings.json` | platné výstrahy pro ORP Karviná | každých 10 min |
+| `alerts-state.json` | odeslaná upozornění (aby nechodila dvakrát) | každých 10 min |
 
 ## Nastavení upozornění
 
