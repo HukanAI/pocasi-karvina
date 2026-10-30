@@ -4,9 +4,9 @@ name: Aktualizace dat
 
 on:
   schedule:
-    # Každých 10 minut: plánovač GitHubu běhy často vynechává (ověřeno: 1 z 9 hodinových běhů),
-    # častější plán dává víc příležitostí. Skripty jsou idempotentní (upozornění se neopakují,
-    # klimatické řady se stahují jen jednou denně). ČHMÚ zveřejňuje 10min data kolem :03 každé hodiny.
+    # Hlavní spouštění zajišťuje externí služba cron-job.org (workflow_dispatch každých 10 min, viz README),
+    # protože plánovač GitHubu běhy vynechává (ověřeno: 1 z 9 hodinových běhů, 0 z 3 desetiminutových).
+    # Vlastní plán zůstává jako záloha. Skripty jsou idempotentní, souběžné spuštění hlídá `concurrency`.
     - cron: '2-59/10 * * * *'
   workflow_dispatch:
     inputs:
@@ -94,11 +94,10 @@ jobs:
           git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
           ls -la
 
-      - name: Udržení plánovače v chodu
-        if: github.event_name == 'schedule'
+      - name: Udržení workflow v chodu
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
-        # GitHub vypíná plánované workflow po 60 dnech bez aktivity; opětovné povolení odpočet resetuje.
-        # Volá se při každém plánovaném běhu, aby nezáleželo na tom, který běh plánovač vynechá.
+        # GitHub vypíná plánované workflow po 60 dnech bez aktivity a vypnuté nejde spustit ani zvenku.
+        # Opětovné povolení odpočet resetuje; volá se při každém běhu (plánovaném i externím).
         run: gh api -X PUT "repos/${{ github.repository }}/actions/workflows/data.yml/enable" && echo "Plánovač obnoven."

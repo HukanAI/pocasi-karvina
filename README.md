@@ -46,6 +46,31 @@ GitHub Action (`.github/workflows/data.yml`) do větve `data`:
 | `warnings.json` | platné výstrahy pro ORP Karviná | každých 10 min |
 | `alerts-state.json` | odeslaná upozornění (aby nechodila dvakrát) | každých 10 min |
 
+## Spolehlivé spouštění aktualizací (cron-job.org)
+
+Plánovač GitHub Actions plánované běhy často vynechává (u tohoto repozitáře proběhl 1 z 9 hodinových běhů).
+Aktualizaci dat proto každých 10 minut spouští bezplatná služba [cron-job.org](https://cron-job.org)
+voláním GitHub API. Vlastní plán ve workflow zůstává jako záloha.
+
+**1. Token na GitHubu** (Settings → Developer settings → Personal access tokens → Fine-grained tokens → Generate new token):
+
+- Repository access: *Only select repositories* → `pocasi-karvina`
+- Permissions → Repository permissions → **Actions: Read and write** (nic dalšího)
+- Token může jen spouštět workflow v tomto repozitáři. Po vypršení platnosti vytvořte nový a vyměňte ho v cron-job.org.
+
+**2. Úloha na cron-job.org** (Create cronjob):
+
+| Pole | Hodnota |
+| --- | --- |
+| URL | `https://api.github.com/repos/HukanAI/pocasi-karvina/actions/workflows/data.yml/dispatches` |
+| Execution schedule | Every 10 minutes |
+| Advanced → Request method | `POST` |
+| Advanced → Headers | `Accept: application/vnd.github+json`, `Authorization: Bearer <token>`, `X-GitHub-Api-Version: 2022-11-28`, `Content-Type: application/json` |
+| Advanced → Request body | `{"ref":"main"}` |
+
+Správná odpověď je **HTTP 204** a v záložce Actions se objeví nový běh *Aktualizace dat* (událost `workflow_dispatch`).
+Doporučeno: v cron-job.org zapnout e-mail při selhání (upozorní např. na vypršený token).
+
 ## Nastavení upozornění
 
 1. V repozitáři: **Settings → Secrets and variables → Actions → New repository secret**,
