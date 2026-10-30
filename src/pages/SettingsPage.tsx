@@ -1,6 +1,7 @@
 // Nastavení, návody (instalace, notifikace) a informace o zdrojích dat
 
 import type { ReactNode } from 'react'
+import { InstallCard } from '../components/InstallCard.tsx'
 import { Card, Segmented, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, GITHUB, LOCATION } from '../config.ts'
 import type { MetaFile } from '../lib/dataTypes.ts'
@@ -62,20 +63,7 @@ export default function SettingsPage() {
         </SourceNote>
       </Card>
 
-      <Card title="Nainstalovat na plochu">
-        <h3 className="text-sm font-semibold">iPhone (Safari)</h3>
-        <ol className="mt-1 space-y-1 text-sm">
-          <Step n={1}>Otevřete aplikaci v Safari.</Step>
-          <Step n={2}>Klepněte na tlačítko Sdílet (čtvereček se šipkou).</Step>
-          <Step n={3}>Zvolte „Přidat na plochu“ a potvrďte.</Step>
-        </ol>
-        <h3 className="mt-3 text-sm font-semibold">Android (Chrome)</h3>
-        <ol className="mt-1 space-y-1 text-sm">
-          <Step n={1}>Otevřete aplikaci v Chrome.</Step>
-          <Step n={2}>Menu ⋮ → „Nainstalovat aplikaci“ (nebo „Přidat na plochu“).</Step>
-        </ol>
-        <SourceNote>Po instalaci se aplikace otevírá na celou obrazovku a funguje i bez internetu s posledními staženými daty.</SourceNote>
-      </Card>
+      <InstallCard />
 
       <Card title="Upozornění do telefonu">
         <p className="text-sm">

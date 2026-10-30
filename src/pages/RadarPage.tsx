@@ -1,4 +1,6 @@
-// Radar srážek (RainViewer) nad mapou s animací posledních ~2 hodin + modelový výhled
+// Radar srážek ve stylu Windy: tmavá mapa, vlastní paleta, jedna časová osa
+// – minulost: skutečný radar RainViewer (dlaždice přebarvené z hodnot dBZ),
+// – budoucnost: předpověď srážek modelu z mřížky bodů Open-Meteo (stejná paleta).
 
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
@@ -7,101 +9,191 @@ import type { RadarData } from '../api/dataBranch.ts'
 import { Card, ErrorCard, LoadingCard, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, LOCATION } from '../config.ts'
 import { num } from '../lib/format.ts'
-import { formatAgo, formatTime, HOUR, MINUTE } from '../lib/time.ts'
+import { gridBounds, type PrecipGrid, renderGridFrame } from '../lib/precipGrid.ts'
+import { LEGEND_DBZ_RANGE, LEGEND_MMH, legendGradient, mmhToDbz, recolorRainViewer } from '../lib/radarPalette.ts'
+import { formatAgo, formatMoment, formatTime, HOUR, MINUTE } from '../lib/time.ts'
 import { useNow } from '../state/derived.ts'
-import { useForecast, useRadar } from '../state/queries.ts'
-import { useSettings } from '../state/useSettings.ts'
+import { useForecast, usePrecipGrid, useRadar } from '../state/queries.ts'
 
 /** RainViewer poskytuje dlaždice jen do zoomu 7 (vyšší vrací „Zoom Level Not Supported“) */
 const RADAR_MAX_NATIVE_ZOOM = 7
+const FORECAST_HOURS = 12
+const FORECAST_STEP = 30 * MINUTE
 
-function RadarMap({ radar }: { radar: RadarData }) {
-  const { dark } = useSettings()
+type Frame = { kind: 'radar'; time: number; path: string } | { kind: 'model'; time: number; index: number }
+
+/** Dlaždice RainViewer přebarvené paletou Windy (barva → dBZ → nová barva) */
+class RadarTiles extends L.GridLayer {
+  url: string
+
+  constructor(url: string, options: L.GridLayerOptions) {
+    super(options)
+    this.url = url
+  }
+
+  createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
+    const tile = document.createElement('canvas')
+    tile.width = tile.height = 256
+    const img = new Image()
+    img.crossOrigin = 'anonymous'
+    img.onload = () => {
+      try {
+        const ctx = tile.getContext('2d', { willReadFrequently: true })!
+        ctx.drawImage(img, 0, 0)
+        const data = ctx.getImageData(0, 0, 256, 256)
+        recolorRainViewer(data.data)
+        ctx.putImageData(data, 0, 0)
+        done(undefined, tile)
+      } catch (e) {
+        done(e as Error, tile)
+      }
+    }
+    img.onerror = () => done(new Error('Radarová dlaždice nedostupná'), tile)
+    // 0_1 = bez vyhlazení (přesné barvy pro převod na dBZ), se sněhem
+    img.src = this.url.replace('{z}', String(coords.z)).replace('{x}', String(coords.x)).replace('{y}', String(coords.y))
+    return tile
+  }
+}
+
+function gridFrameUrl(grid: PrecipGrid, index: number): string {
+  const { width, height, data } = renderGridFrame(grid, index, 24)
+  const c = document.createElement('canvas')
+  c.width = width
+  c.height = height
+  c.getContext('2d')!.putImageData(new ImageData(data, width, height), 0, 0)
+  return c.toDataURL('image/png')
+}
+
+function buildFrames(radar: RadarData | undefined, grid: PrecipGrid | undefined, now: number): Frame[] {
+  const frames: Frame[] = (radar?.frames ?? []).map((f) => ({ kind: 'radar', time: f.time, path: f.path }))
+  const lastRadar = frames.length ? frames[frames.length - 1].time : now
+  if (grid) {
+    grid.times.forEach((t, index) => {
+      if (t > lastRadar && t <= now + FORECAST_HOURS * HOUR && t % FORECAST_STEP === 0) frames.push({ kind: 'model', time: t, index })
+    })
+  }
+  return frames
+}
+
+function RadarMap({ radar, grid }: { radar: RadarData | undefined; grid: PrecipGrid | undefined }) {
+  const now = useNow(60_000)
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
-  const base = useRef<L.TileLayer[]>([])
-  const layers = useRef<L.TileLayer[]>([])
-  const [frame, setFrame] = useState(radar.frames.length - 1)
+  const layers = useRef(new Map<string, L.Layer & { setOpacity: (o: number) => unknown }>())
+  const areaRect = useRef<L.Rectangle | null>(null)
+  const frames = useMemo(() => buildFrames(radar, grid, now), [radar, grid, now])
+  const nowIndex = useMemo(() => {
+    let i = -1
+    frames.forEach((f, k) => f.kind === 'radar' && (i = k))
+    return Math.max(0, i)
+  }, [frames])
+  const [frame, setFrame] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
-  const [opacity, setOpacity] = useState(0.75)
+  const current = Math.min(frame ?? nowIndex, frames.length - 1)
 
-  // Mapa
+  // Mapa – vždy tmavá jako ve Windy
   useEffect(() => {
     if (!box.current) return
-    const m = L.map(box.current, { center: [LOCATION.latitude, LOCATION.longitude], zoom: 8, minZoom: 5, maxZoom: 11, zoomControl: false, attributionControl: true })
+    const m = L.map(box.current, { center: [LOCATION.latitude, LOCATION.longitude], zoom: 7, minZoom: 5, maxZoom: 10, zoomControl: false })
     L.control.zoom({ position: 'topright' }).addTo(m)
-    const marker = L.circleMarker([LOCATION.latitude, LOCATION.longitude], { radius: 6, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1 }).addTo(m)
-    marker.bindTooltip(LOCATION.name, { permanent: false })
-    L.circleMarker([CHMI_STATION.latitude, CHMI_STATION.longitude], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 1 })
-      .addTo(m)
-      .bindTooltip(`Stanice ČHMÚ ${CHMI_STATION.name}`)
-    // Popisky měst nad radarem
+    const esri = (kind: 'Base' | 'Reference') => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`
+    L.tileLayer(esri('Base'), { attribution: 'Podklad © Esri, HERE, Garmin, © OpenStreetMap', maxZoom: 16 }).addTo(m)
     m.createPane('labels')
     const labels = m.getPane('labels')!
     labels.style.zIndex = '650'
     labels.style.pointerEvents = 'none'
+    L.tileLayer(esri('Reference'), { pane: 'labels', maxZoom: 16 }).addTo(m)
+    L.circleMarker([LOCATION.latitude, LOCATION.longitude], { radius: 6, color: '#fff', weight: 2, fillColor: '#2563eb', fillOpacity: 1, pane: 'labels' })
+      .addTo(m)
+      .bindTooltip(LOCATION.name)
+    L.circleMarker([CHMI_STATION.latitude, CHMI_STATION.longitude], { radius: 4, color: '#fff', weight: 1.5, fillColor: '#f59e0b', fillOpacity: 1, pane: 'labels' })
+      .addTo(m)
+      .bindTooltip(`Stanice ČHMÚ ${CHMI_STATION.name}`)
     map.current = m
+    const store = layers.current
     return () => {
       m.remove()
       map.current = null
-      base.current = []
-      layers.current = []
+      store.clear()
+      areaRect.current = null
     }
   }, [])
 
-  // Podkladová mapa podle motivu (Esri Gray Canvas – neutrální podklad pro překryvné vrstvy, bez API klíče)
+  // Při nových datech zahodit vrstvy, které už na ose nejsou
+  useEffect(() => {
+    const keep = new Set(frames.map((f) => (f.kind === 'radar' ? `r:${f.path}` : `m:${f.time}:${grid?.times[0]}`)))
+    for (const [k, l] of layers.current) {
+      if (!keep.has(k)) {
+        l.remove()
+        layers.current.delete(k)
+      }
+    }
+  }, [frames, grid])
+
+  // Zobrazení aktuálního snímku; vrstvy se vytvářejí až při prvním zobrazení a další snímek se načte dopředu
   useEffect(() => {
     const m = map.current
-    if (!m) return
-    base.current.forEach((l) => l.remove())
-    const variant = dark ? 'Dark' : 'Light'
-    const url = (kind: 'Base' | 'Reference') =>
-      `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_${variant}_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`
-    const ground = L.tileLayer(url('Base'), {
-      attribution: 'Podklad © Esri, HERE, Garmin, © <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
-      maxZoom: 16,
-    }).addTo(m)
-    ground.bringToBack()
-    const labels = L.tileLayer(url('Reference'), { pane: 'labels', maxZoom: 16 }).addTo(m)
-    base.current = [ground, labels]
-  }, [dark])
+    if (!m || !frames.length) return
+    const ensure = (f: Frame) => {
+      const key = f.kind === 'radar' ? `r:${f.path}` : `m:${f.time}:${grid?.times[0]}`
+      let l = layers.current.get(key)
+      if (!l) {
+        if (f.kind === 'radar') {
+          l = new RadarTiles(`${radar!.host}${f.path}/256/{z}/{x}/{y}/2/0_1.png`, {
+            maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
+            maxZoom: 10,
+            opacity: 0,
+            zIndex: 10,
+            attribution: '<a href="https://www.rainviewer.com/">RainViewer</a>',
+          })
+        } else {
+          l = L.imageOverlay(gridFrameUrl(grid!, f.index), gridBounds(grid!), { opacity: 0, zIndex: 10, attribution: 'Předpověď Open-Meteo' })
+        }
+        l.addTo(m)
+        layers.current.set(key, l)
+      }
+      return key
+    }
+    const curKey = ensure(frames[current])
+    if (current + 1 < frames.length) ensure(frames[current + 1])
+    for (const [k, l] of layers.current) l.setOpacity(k === curKey ? 0.9 : 0)
 
-  // Radarové vrstvy (předem načtené, přepíná se jen průhlednost → plynulá animace)
-  useEffect(() => {
-    const m = map.current
-    if (!m) return
-    layers.current.forEach((l) => l.remove())
-    layers.current = radar.frames.map((f) =>
-      L.tileLayer(`${radar.host}${f.path}/256/{z}/{x}/{y}/2/1_1.png`, {
-        opacity: 0,
-        maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
-        maxZoom: 11,
-        attribution: '<a href="https://www.rainviewer.com/">RainViewer</a>',
-        zIndex: 10,
-      }).addTo(m),
-    )
-    setFrame(radar.frames.length - 1)
-  }, [radar])
+    // Obrys oblasti modelové předpovědi
+    if (frames[current].kind === 'model' && grid) {
+      areaRect.current ??= L.rectangle(gridBounds(grid), { color: '#ffffff', weight: 1, opacity: 0.35, dashArray: '4 6', fill: false, interactive: false }).addTo(m)
+    } else {
+      areaRect.current?.remove()
+      areaRect.current = null
+    }
+  }, [current, frames, radar, grid])
 
   useEffect(() => {
-    layers.current.forEach((l, i) => l.setOpacity(i === frame ? opacity : 0))
-  }, [frame, opacity, radar])
-
-  useEffect(() => {
-    if (!playing) return
-    const id = setInterval(() => setFrame((f) => (f + 1) % radar.frames.length), 700)
+    if (!playing || frames.length < 2) return
+    const id = setInterval(() => setFrame((f) => ((f ?? nowIndex) + 1) % frames.length), 550)
     return () => clearInterval(id)
-  }, [playing, radar.frames.length])
+  }, [playing, frames.length, nowIndex])
 
-  const f = radar.frames[frame]
+  if (!frames.length) return null
+  const f = frames[current]
+  const firstModel = frames.findIndex((x) => x.kind === 'model')
+  const radarShare = firstModel === -1 ? 100 : (firstModel / Math.max(1, frames.length - 1)) * 100
+
   return (
     <div>
-      <div ref={box} className="h-[52vh] min-h-[320px] w-full overflow-hidden rounded-2xl" />
+      <div className="relative">
+        <div ref={box} className="h-[58vh] min-h-[340px] w-full overflow-hidden rounded-2xl bg-[#1d1f22]" />
+        {/* Štítek času jako ve Windy */}
+        <div className="pointer-events-none absolute top-3 left-3 z-[700] rounded-xl bg-black/60 px-3 py-1.5 text-white backdrop-blur">
+          <div className="text-[10px] font-semibold tracking-wider uppercase opacity-80">{f.kind === 'radar' ? 'Radar · skutečnost' : 'Předpověď modelu'}</div>
+          <div className="tabular text-lg leading-tight font-semibold">{formatMoment(f.time, now)}</div>
+        </div>
+      </div>
+
       <div className="mt-3 flex items-center gap-3">
         <button
           type="button"
           onClick={() => setPlaying((p) => !p)}
-          className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white active:scale-95"
+          className="flex h-11 w-11 shrink-0 items-center justify-center rounded-full bg-[var(--accent)] text-white shadow active:scale-95"
           aria-label={playing ? 'Zastavit animaci' : 'Přehrát animaci'}
         >
           {playing ? (
@@ -116,11 +208,16 @@ function RadarMap({ radar }: { radar: RadarData }) {
           )}
         </button>
         <div className="flex-1">
+          {/* Pruh časové osy: radar (plná) a předpověď (šrafovaná) – zarovnaný s posuvníkem */}
+          <div className="mx-[8px] flex h-1.5 overflow-hidden rounded-full">
+            <div className="h-full bg-sky-400/70" style={{ width: `${radarShare}%` }} />
+            <div className="h-full flex-1" style={{ background: 'repeating-linear-gradient(90deg, rgba(167,139,250,.75) 0 6px, rgba(167,139,250,.25) 6px 10px)' }} />
+          </div>
           <input
             type="range"
             min={0}
-            max={radar.frames.length - 1}
-            value={frame}
+            max={frames.length - 1}
+            value={current}
             onChange={(e) => {
               setPlaying(false)
               setFrame(Number(e.target.value))
@@ -128,24 +225,62 @@ function RadarMap({ radar }: { radar: RadarData }) {
             className="w-full accent-[var(--accent)]"
             aria-label="Čas snímku"
           />
-          <div className="flex justify-between text-[11px] text-faint">
-            <span>{formatTime(radar.frames[0].time)}</span>
-            <span className="tabular text-sm font-semibold text-[var(--fg)]">{f ? formatTime(f.time) : '–'}</span>
-            <span>{formatTime(radar.frames[radar.frames.length - 1].time)}</span>
+          <div className="flex justify-between text-[10px] text-faint">
+            <span>
+              {formatTime(frames[0].time)} <span className="text-sky-500">radar</span>
+            </span>
+            <button type="button" className="font-semibold text-[var(--accent)]" onClick={() => (setPlaying(false), setFrame(nowIndex))}>
+              Teď
+            </button>
+            <span>
+              <span className="text-violet-400">předpověď</span> +{Math.round((frames[frames.length - 1].time - now) / HOUR)} h
+            </span>
           </div>
         </div>
       </div>
-      <label className="mt-2 flex items-center gap-2 text-xs text-muted">
-        Průhlednost radaru
-        <input type="range" min={0.3} max={1} step={0.05} value={opacity} onChange={(e) => setOpacity(Number(e.target.value))} className="flex-1 accent-[var(--accent)]" />
-      </label>
-      <div className="mt-3 flex items-center gap-2 text-[11px] text-muted">
-        <span>mrholení</span>
-        <div className="h-2 flex-1 rounded-full" style={{ background: 'linear-gradient(90deg,#d6d0bf,#88ddee,#0099cc,#0077aa,#ffee00,#ffaa00,#ff4400,#c10000,#ffaaff)' }} />
-        <span>extrémní</span>
+
+      <Legend />
+    </div>
+  )
+}
+
+function Legend() {
+  const { min, max } = LEGEND_DBZ_RANGE
+  const pos = (mmh: number) => ((mmhToDbz(mmh) - min) / (max - min)) * 100
+  return (
+    <div className="mt-3 space-y-1.5">
+      <div className="relative h-3 rounded-full" style={{ background: legendGradient() }} />
+      <div className="relative h-3 text-[10px] text-muted">
+        {LEGEND_MMH.map((v) => (
+          <span key={v} className="absolute -translate-x-1/2" style={{ left: `${Math.min(97, Math.max(3, pos(v)))}%` }}>
+            {num(v, v < 1 ? 1 : 0)}
+          </span>
+        ))}
+      </div>
+      <div className="flex items-center gap-2 text-[10px] text-muted">
+        <span>mm/h · déšť</span>
+        <span className="ml-auto">sníh</span>
+        <div className="h-2 w-20 rounded-full" style={{ background: legendGradient(true) }} />
       </div>
     </div>
   )
+}
+
+/** Shrnutí z modelové mřížky: kdy a jak silně bude pršet v okolí (≤ ~25 km) */
+function nearbySummary(grid: PrecipGrid, now: number): string {
+  const cy = Math.floor(grid.lats.length / 2)
+  const cx = Math.floor(grid.lons.length / 2)
+  let first: number | null = null
+  let peak = 0
+  grid.times.forEach((t, k) => {
+    if (t <= now || t > now + FORECAST_HOURS * HOUR) return
+    let m = 0
+    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) m = Math.max(m, grid.rate[k][cy + dy]?.[cx + dx] ?? 0)
+    if (m >= 0.1 && first === null) first = t - 15 * MINUTE
+    peak = Math.max(peak, m)
+  })
+  if (first === null) return `V okolí Karviné se v příštích ${FORECAST_HOURS} hodinách srážky nečekají.`
+  return `V okolí Karviné začne podle modelu pršet ${formatMoment(first, now)}, nejvyšší intenzita asi ${num(peak, 1)} mm/h.`
 }
 
 function ModelOutlook() {
@@ -184,17 +319,26 @@ function ModelOutlook() {
 export default function RadarPage() {
   const now = useNow(60_000)
   const q = useRadar()
+  const g = usePrecipGrid()
+  const lastRadar = q.data?.frames.at(-1)?.time
   return (
     <div className="space-y-3 pb-4">
-      {q.isError && !q.data ? (
-        <ErrorCard title="Radar srážek" error={q.error} onRetry={() => q.refetch()} />
-      ) : !q.data ? (
+      {q.isError && !q.data && g.isError && !g.data ? (
+        <ErrorCard title="Radar srážek" error={q.error} onRetry={() => (q.refetch(), g.refetch())} />
+      ) : !q.data && !g.data ? (
         <LoadingCard title="Radar srážek" lines={8} />
       ) : (
-        <Card title="Radar srážek" subtitle={`Posledních ${Math.round((q.data.frames.at(-1)!.time - q.data.frames[0].time) / 60_000)} min · poslední snímek ${formatAgo(q.data.frames.at(-1)!.time, now)}`}>
-          <RadarMap radar={q.data} />
+        <Card
+          title="Radar a předpověď srážek"
+          subtitle={`${lastRadar ? `Radar do ${formatTime(lastRadar)} (${formatAgo(lastRadar, now)})` : 'Radar nedostupný'}${g.data ? `, předpověď na ${FORECAST_HOURS} h` : ''}`}
+        >
+          <RadarMap radar={q.data} grid={g.data} />
+          {g.data && <p className="mt-3 text-sm">{nearbySummary(g.data, now)}</p>}
+          {q.isError && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Radar se nepodařilo načíst – zobrazuji jen předpověď.</p>}
+          {g.isError && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Předpověď srážek se nepodařilo načíst – zobrazuji jen radar.</p>}
           <SourceNote>
-            Radarová data: RainViewer (kompozit evropských radarů). Detail je omezen na úroveň přiblížení 7 (≈ 1 km), při větším přiblížení se obraz jen zvětšuje. Modrá tečka = váš bod, oranžová = stanice ČHMÚ.
+            Plná část osy = skutečný radar (RainViewer, posledních ~2 h, detail do ≈ 1 km). Šrafovaná část = předpověď modelu Open-Meteo pro oblast ±130 km (čárkovaný obdélník),
+            hrubší rozlišení (≈ 20 km). Barvy podle intenzity srážek jako ve Windy; slabé mrholení je modré, sníh bělavý.
           </SourceNote>
         </Card>
       )}

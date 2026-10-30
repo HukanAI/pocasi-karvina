@@ -1,3 +1,4 @@
+import { InstallCard } from '../components/InstallCard.tsx'
 import { AstroCard, HistoryTeaser, WarningsBanner } from '../components/today/Extras.tsx'
 import { DetailTiles } from '../components/today/DetailTiles.tsx'
 import { Hero } from '../components/today/Hero.tsx'
@@ -9,6 +10,7 @@ export default function TodayPage() {
   return (
     <div className="space-y-3 pb-4">
       <Hero />
+      <InstallCard compact />
       <WarningsBanner />
       <RainCard />
       <HourlyStrip />

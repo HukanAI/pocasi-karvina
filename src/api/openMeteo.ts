@@ -2,6 +2,7 @@
 // timezone=Europe/Prague zajistí, že denní agregace (max/min, úhrn) odpovídají místním dnům.
 
 import { API, LOCATION, MODELS } from '../config.ts'
+import { buildGrid, gridCoords, type PrecipGrid } from '../lib/precipGrid.ts'
 import { percentile } from '../lib/stats.ts'
 
 const base = () =>
@@ -199,4 +200,31 @@ export function indexAtOrBefore(time: number[], t: number): number {
     } else hi = mid - 1
   }
   return ans
+}
+
+// ---------------------------------------------------------------- Mřížka předpovědi srážek (radar do budoucna)
+
+/** Předpověď srážek po 15 min na 12 h pro mřížku 13 × 17 bodů kolem Karviné (jeden dotaz, ~300 kB) */
+export async function fetchPrecipGrid(signal?: AbortSignal): Promise<PrecipGrid> {
+  const { lats, lons } = gridCoords()
+  const qLat: number[] = []
+  const qLon: number[] = []
+  const idx: { latIdx: number; lonIdx: number }[] = []
+  lats.forEach((lat, latIdx) =>
+    lons.forEach((lon, lonIdx) => {
+      qLat.push(lat)
+      qLon.push(lon)
+      idx.push({ latIdx, lonIdx })
+    }),
+  )
+  const url =
+    `${API.forecast}?latitude=${qLat.join(',')}&longitude=${qLon.join(',')}&timeformat=unixtime` +
+    '&minutely_15=precipitation,snowfall&forecast_minutely_15=48'
+  const r = await getJson<{ minutely_15: { time: number[]; precipitation: Arr; snowfall: Arr } }[]>(url, signal)
+  if (!Array.isArray(r) || r.length !== idx.length) throw new Error(`Mřížka srážek: očekáváno ${idx.length} bodů, přišlo ${Array.isArray(r) ? r.length : 1}`)
+  return buildGrid(
+    lats,
+    lons,
+    r.map((p, i) => ({ ...idx[i], time: ms(p.minutely_15.time), precipitation: p.minutely_15.precipitation, snowfall: p.minutely_15.snowfall })),
+  )
 }

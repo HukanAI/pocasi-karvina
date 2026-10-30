@@ -3,7 +3,7 @@
 
 import { useQuery } from '@tanstack/react-query'
 import { fetchData, fetchRadar } from '../api/dataBranch.ts'
-import { fetchAir, fetchEnsemble, fetchForecast, fetchModels } from '../api/openMeteo.ts'
+import { fetchAir, fetchEnsemble, fetchForecast, fetchModels, fetchPrecipGrid } from '../api/openMeteo.ts'
 import type { DailySeries } from '../lib/climate.ts'
 import type { MetaFile, StationNow, StationSra10, WarningsFile } from '../lib/dataTypes.ts'
 
@@ -20,6 +20,9 @@ export const useEnsemble = () =>
 
 export const useAir = () =>
   useQuery({ queryKey: ['air'], queryFn: ({ signal }) => fetchAir(signal), staleTime: 30 * MIN, refetchInterval: 30 * MIN })
+
+export const usePrecipGrid = () =>
+  useQuery({ queryKey: ['precipGrid'], queryFn: ({ signal }) => fetchPrecipGrid(signal), staleTime: 20 * MIN, refetchInterval: 30 * MIN })
 
 export const useRadar = () =>
   useQuery({ queryKey: ['radar'], queryFn: ({ signal }) => fetchRadar(signal), staleTime: 5 * MIN, refetchInterval: 5 * MIN })

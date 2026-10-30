@@ -20,6 +20,9 @@ export default defineConfig({
       registerType: 'autoUpdate',
       includeAssets: ['favicon.svg', 'apple-touch-icon-180x180.png'],
       manifest: {
+        // Jednoznačná identita aplikace. Změna oproti původnímu (odvozenému ze start_url) umožní instalaci
+        // i v telefonech, kde zůstala dřívější „zapomenutá“ instalace bez ikony na ploše.
+        id: '/pocasi-karvina/?app=pocasi-karvina',
         name: 'Počasí Karviná',
         short_name: 'Počasí KA',
         description: 'Detailní počasí, předpověď a klimatická historie pro Karvinou',

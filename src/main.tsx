@@ -1,5 +1,7 @@
 import '@fontsource-variable/inter'
 import './index.css'
+// Zachytit výzvu k instalaci co nejdřív (může přijít ještě před vykreslením)
+import './state/install.ts'
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister'
 import { QueryClient } from '@tanstack/react-query'
 import { PersistQueryClientProvider } from '@tanstack/react-query-persist-client'
