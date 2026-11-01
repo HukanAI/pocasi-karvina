@@ -4,6 +4,7 @@ import {
   expectedRainEnd,
   findGaps,
   lastWetDay,
+  nextRainChance,
   mergeSamples,
   nextRain,
   rainState,
@@ -171,5 +172,29 @@ describe('lastWetDay', () => {
     expect(lastWetDay(d)).toBe('2026-10-02')
     expect(lastWetDay(d, 1)).toBe('2026-10-01')
     expect(lastWetDay([])).toBeNull()
+  })
+})
+
+describe('nextRainChance', () => {
+  const H = 3_600_000
+  const now = T0
+  it('najde první hodinu se šancí ≥ 10 % i bez předpovězeného množství (případ „zítra 13 %, 0 mm“)', () => {
+    const hours = [
+      { t: now + H, prob: 5, mm: 0 },
+      { t: now + 2 * H, prob: 13, mm: 0 },
+      { t: now + 30 * H, prob: 8, mm: 0.7 },
+    ]
+    expect(nextRainChance(hours, now)).toEqual({ t: now + 2 * H, prob: 13, mm: 0 })
+  })
+  it('stačí i předpovězené množství při nízké pravděpodobnosti', () => {
+    expect(nextRainChance([{ t: now + H, prob: 8, mm: 0.7 }], now)?.mm).toBe(0.7)
+  })
+  it('hranice: 9 % nestačí, 10 % ano; minulé hodiny se ignorují', () => {
+    expect(nextRainChance([{ t: now + H, prob: 9, mm: 0 }], now)).toBeNull()
+    expect(nextRainChance([{ t: now + H, prob: 10, mm: 0 }], now)?.prob).toBe(10)
+    expect(nextRainChance([{ t: now, prob: 90, mm: 3 }], now)).toBeNull()
+  })
+  it('chybějící hodnoty (null) se berou jako 0', () => {
+    expect(nextRainChance([{ t: now + H, prob: null, mm: null }], now)).toBeNull()
   })
 })

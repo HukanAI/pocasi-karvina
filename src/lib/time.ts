@@ -112,6 +112,27 @@ export function formatMoment(ms: number, nowMs: number = Date.now()): string {
   return `${formatWeekdayShort(ms)} ${formatDayMonth(ms)} v ${time}`
 }
 
+const WEEKDAY_PHRASE: Record<string, string> = {
+  pondělí: 'v pondělí',
+  úterý: 'v úterý',
+  středa: 've středu',
+  čtvrtek: 've čtvrtek',
+  pátek: 'v pátek',
+  sobota: 'v sobotu',
+  neděle: 'v neděli',
+}
+
+/** Den do věty: 'dnes', 'zítra', 'včera', jinak 'v pondělí 9. 11.' */
+export function formatDayPhrase(ms: number, nowMs: number = Date.now()): string {
+  const key = localDateKey(ms)
+  const today = localDateKey(nowMs)
+  if (key === today) return 'dnes'
+  if (key === addDays(today, -1)) return 'včera'
+  if (key === addDays(today, 1)) return 'zítra'
+  const wd = formatWeekdayLong(ms)
+  return `${WEEKDAY_PHRASE[wd] ?? wd} ${formatDayMonth(ms)}`
+}
+
 /** Délka trvání: '3 d 7 h 12 min', '5 h 3 min', '12 min' */
 export function formatDuration(ms: number, opts: { seconds?: boolean } = {}): string {
   const neg = ms < 0

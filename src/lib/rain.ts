@@ -177,3 +177,25 @@ export function lastWetDay(daily: { date: string; mm: number | null }[], minTota
   }
   return null
 }
+
+/** Hranice pravděpodobnosti, od které aplikace ukazuje šanci na srážky (stejná jako v hodinové předpovědi) */
+export const CHANCE_MIN_PROB = 10
+
+export interface HourChance {
+  /** Konec hodinového intervalu (ms) – stejný čas, pod kterým hodinu ukazuje hodinová předpověď */
+  t: number
+  prob: number | null
+  mm: number | null
+}
+
+/**
+ * Nejbližší hodina, kdy může pršet: pravděpodobnost ≥ 10 % NEBO model počítá s ≥ 0,1 mm.
+ * Odpovídá tomu, co uživatel vidí v hodinové předpovědi (procenta u kapky).
+ */
+export function nextRainChance(hours: HourChance[], now: number, minProb = CHANCE_MIN_PROB): HourChance | null {
+  for (const h of [...hours].sort((a, b) => a.t - b.t)) {
+    if (h.t <= now) continue
+    if ((h.prob ?? 0) >= minProb || (h.mm ?? 0) >= WET_MIN_MM - EPS) return h
+  }
+  return null
+}

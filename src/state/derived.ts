@@ -4,7 +4,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { type Forecast, indexAtOrBefore } from '../api/openMeteo.ts'
 import { dayPhase } from '../lib/astro.ts'
 import type { StationNow, StationSra10 } from '../lib/dataTypes.ts'
-import { expectedRainEnd, type ForecastPrecip, mergeSamples, nextRain, type PrecipSample, rainState } from '../lib/rain.ts'
+import { expectedRainEnd, type ForecastPrecip, mergeSamples, nextRain, nextRainChance, type PrecipSample, rainState } from '../lib/rain.ts'
 import { HOUR, MINUTE } from '../lib/time.ts'
 import { wmoSky } from '../lib/wmo.ts'
 import { useForecast, useStationNow, useStationSra } from './queries.ts'
@@ -95,6 +95,13 @@ export function useRain(now: number) {
     return {
       state,
       next: nextRain(future, now),
+      // Šance na srážky stejně jako v hodinové předpovědi (pravděpodobnost ≥ 10 % nebo předpovězené množství)
+      chance: forecast.data
+        ? nextRainChance(
+            forecast.data.hourly.time.map((t, i) => ({ t, prob: forecast.data!.hourly.precipitation_probability[i], mm: forecast.data!.hourly.precipitation[i] })),
+            now,
+          )
+        : null,
       expectedEnd: state.kind === 'raining' ? expectedRainEnd(future, now) : null,
       lastStationT,
       hasStation: station.length > 0,

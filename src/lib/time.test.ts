@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest'
 import {
   addDays,
   daysBetween,
+  formatDayPhrase,
   formatDuration,
   formatMoment,
   formatTime,
@@ -67,6 +68,18 @@ describe('formátování', () => {
     expect(formatDuration(5 * HOUR + 3 * 60_000)).toBe('5 h 3 min')
     expect(formatDuration(12 * 60_000)).toBe('12 min')
     expect(formatDuration(24 * HOUR)).toBe('1 d 0 h 0 min')
+  })
+
+  it('formatDayPhrase skloňuje den v týdnu a nezdvojuje tečku', () => {
+    const now = Date.UTC(2026, 10, 1, 18) // ne 1. 11. 2026, 19:00 místního času
+    expect(formatDayPhrase(Date.UTC(2026, 10, 1, 22), now)).toBe('dnes')
+    expect(formatDayPhrase(Date.UTC(2026, 10, 2, 15), now)).toBe('zítra')
+    expect(formatDayPhrase(Date.UTC(2026, 9, 31, 12), now)).toBe('včera')
+    expect(formatDayPhrase(Date.UTC(2026, 10, 9, 12), now)).toBe('v pondělí 9. 11.')
+    expect(formatDayPhrase(Date.UTC(2026, 10, 4, 12), now)).toBe('ve středu 4. 11.')
+    expect(formatDayPhrase(Date.UTC(2026, 10, 7, 12), now)).toBe('v sobotu 7. 11.')
+    // 23:30 UTC v neděli je už pondělí místního času
+    expect(formatDayPhrase(Date.UTC(2026, 10, 8, 23, 30), now)).toBe('v pondělí 9. 11.')
   })
 
   it('formatMoment používá dnes/včera', () => {

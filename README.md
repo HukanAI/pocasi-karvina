@@ -9,7 +9,7 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 
 - **Dnes**: aktuální stav (měření ČHMÚ + model), odchylka od normálu, **čas od posledního deště** (živé počítadlo z 10min měření srážkoměru ČHMÚ), hodinová předpověď na 48 h, srážky na 2 h po 15 minutách, vítr, tlak, vlhkost, UV, oblačnost, kvalita ovzduší, Slunce a Měsíc, výstrahy ČHMÚ
 - **Předpověď**: 16 dní s hodinovým detailem, jistota předpovědi (ensemble ECMWF, 51 variant), srovnání 6 modelů
-- **Radar** (ve stylu Windy, jedna časová osa): radar ČHMÚ za poslední 2 h (1 km, po 5 min) → nowcasting ČHMÚ na 1 h → model ČHMÚ ALADIN na 24 h (2,3 km)
+- **Radar** (ve stylu Windy, jedna časová osa): radar ČHMÚ za poslední 2 h (1 km, po 5 min) → nowcasting ČHMÚ na 1 h → model ČHMÚ ALADIN na 24 h (2,3 km, celá střední Evropa)
 - **Ovzduší**: index EAQI, PM10, PM2,5, NO₂, O₃, SO₂, CO, denní průměry vs. limity, pyl
 - **Historie**: normál 1991–2020, rekordy dne, tento den v minulých letech (od 1877), letošní rok po měsících, kumulativní srážky, charakteristické dny, klimatický trend a „warming stripes“, suchá období, srovnání libovolných dvou let. Zdroj lze přepnout mezi měřením ČHMÚ a reanalýzou ERA5.
 - **Upozornění do telefonu** (přes aplikaci ntfy): mráz, náledí, bouřky, přívalový déšť, vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30

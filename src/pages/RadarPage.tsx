@@ -6,7 +6,7 @@
 
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RadarData } from '../api/dataBranch.ts'
 import { colorize, type FrameData, leafletBounds, loadFrame, maxDbzNear } from '../components/radar/frames.ts'
 import { Card, ErrorCard, LoadingCard, SourceNote } from '../components/ui.tsx'
@@ -20,6 +20,9 @@ import { useForecast, useRadar, useRadarIndex } from '../state/queries.ts'
 
 /** RainViewer poskytuje dlaždice jen do zoomu 7 (vyšší vrací „Zoom Level Not Supported“) */
 const RV_MAX_NATIVE_ZOOM = 7
+/** Opakování dlaždic, které RainViewer odmítl (limit požadavků se obnovuje po minutě) */
+const RV_RETRIES = 3
+const RV_RETRY_MS = 25_000
 const MODEL_HOURS = 24
 const OPACITY = 0.85
 
@@ -75,6 +78,20 @@ class RainViewerTiles extends L.GridLayer {
   createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
     const tile = document.createElement('canvas')
     tile.width = tile.height = 256
+    // Vyříznutá oblast v pixelech dlaždice
+    const cut = this.mask && {
+      x0: tileX(this.mask.west, coords.z) - coords.x * 256,
+      x1: tileX(this.mask.east, coords.z) - coords.x * 256,
+      y0: tileY(this.mask.north, coords.z) - coords.y * 256,
+      y1: tileY(this.mask.south, coords.z) - coords.y * 256,
+    }
+    // Dlaždice celá pod radarem ČHMÚ se vůbec nestahuje (RainViewer omezuje počet požadavků za minutu)
+    if (cut && cut.x0 <= 0 && cut.y0 <= 0 && cut.x1 >= 256 && cut.y1 >= 256) {
+      queueMicrotask(() => done(undefined, tile))
+      return tile
+    }
+    const src = this.url.replace('{z}', String(coords.z)).replace('{x}', String(coords.x)).replace('{y}', String(coords.y))
+    let attempt = 0
     const img = new Image()
     img.crossOrigin = 'anonymous'
     img.onload = () => {
@@ -84,31 +101,65 @@ class RainViewerTiles extends L.GridLayer {
         const data = ctx.getImageData(0, 0, 256, 256)
         recolorRainViewer(data.data)
         ctx.putImageData(data, 0, 0)
-        if (this.mask) {
-          const x0 = tileX(this.mask.west, coords.z) - coords.x * 256
-          const x1 = tileX(this.mask.east, coords.z) - coords.x * 256
-          const y0 = tileY(this.mask.north, coords.z) - coords.y * 256
-          const y1 = tileY(this.mask.south, coords.z) - coords.y * 256
-          ctx.clearRect(x0, y0, x1 - x0, y1 - y0)
-        }
-        done(undefined, tile)
+        if (cut) ctx.clearRect(cut.x0, cut.y0, cut.x1 - cut.x0, cut.y1 - cut.y0)
+        if (attempt === 0) done(undefined, tile)
       } catch (e) {
-        done(e as Error, tile)
+        if (attempt === 0) done(e as Error, tile)
       }
     }
-    img.onerror = () => done(new Error('Radarová dlaždice nedostupná'), tile)
-    img.src = this.url.replace('{z}', String(coords.z)).replace('{x}', String(coords.x)).replace('{y}', String(coords.y))
+    img.onerror = () => {
+      // Animace na dlaždici nečeká; po překročení limitu RainViewer to za chvíli zkusí znovu a dokreslí ji
+      if (attempt === 0) done(new Error('Radarová dlaždice nedostupná'), tile)
+      if (attempt >= RV_RETRIES) return
+      setTimeout(() => {
+        attempt++
+        // Dlaždice mezitím mohla zmizet (posun, zoom)
+        if (tile.isConnected) img.src = src
+      }, RV_RETRY_MS * (attempt + 1))
+    }
+    img.src = src
     return tile
   }
 }
 
 type OpacityLayer = L.Layer & { setOpacity: (o: number) => unknown }
 
+const BLANK_GIF = 'data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw=='
+const PLAY_STEP_MS = 450
+/** Kolik kroků animace nejvýš počkat na nenačtený snímek, než se přeskočí (pomalá síť, chybějící dlaždice) */
+const PLAY_MAX_WAIT = 8
+/** Na posledním snímku animace chvíli zůstat, než začne znovu */
+const PLAY_END_HOLD = 3
+
+const frameKey = (f: Frame) => `${f.kind}:${f.src}`
+const veilKey = (f: Frame) => (f.kind === 'nowcast' || f.kind === 'model' ? `veil:${f.kind}:${JSON.stringify(f.bounds)}` : null)
+
+/** Ztmavení a čárkovaný okraj mimo oblast, kterou pokrývá nowcasting nebo model – aby bylo jasné, proč tam srážky nejsou */
+function coverageVeil(b: GeoBounds, pane: string): L.Polygon {
+  const world: L.LatLngTuple[] = [
+    [-85, -180],
+    [85, -180],
+    [85, 180],
+    [-85, 180],
+  ]
+  const hole: L.LatLngTuple[] = [
+    [b.south, b.west],
+    [b.north, b.west],
+    [b.north, b.east],
+    [b.south, b.east],
+  ]
+  return L.polygon([world, hole], { pane, interactive: false, color: '#fff', weight: 1.5, dashArray: '5 5', opacity: 0, fillColor: '#000', fillOpacity: 0 })
+}
+
 function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }) {
   const now = useNow(60_000)
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
   const layers = useRef(new Map<string, OpacityLayer>())
+  const veils = useRef(new Map<string, L.Polygon>())
+  // Vrstvy, které mají vykreslený obsah (obrázek načtený, všechny viditelné dlaždice stažené)
+  const [ready, setReady] = useState<ReadonlySet<string>>(new Set())
+  const readyRef = useRef(ready)
   const nowIndex = useMemo(() => {
     let i = 0
     frames.forEach((f, k) => (f.kind === 'obs' || f.kind === 'rv') && (i = k))
@@ -117,6 +168,25 @@ function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }
   const [frame, setFrame] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
   const current = Math.min(frame ?? nowIndex, frames.length - 1)
+  const currentRef = useRef(current)
+  useEffect(() => {
+    readyRef.current = ready
+    currentRef.current = current
+  })
+
+  // RainViewer jako okolí mimo dosah ČHMÚ (jen u skutečných radarových snímků). RainViewer má snímky po 10 min,
+  // radar ČHMÚ po 5 min → dva snímky ČHMÚ sdílejí jednu vrstvu okolí (klíč podle cesty RainViewer).
+  const contexts = useMemo(
+    () =>
+      frames.map((f) => {
+        if (f.kind !== 'obs' || !rv?.frames.length) return null
+        const near = rv.frames.reduce((a, b) => (Math.abs(b.time - f.time) < Math.abs(a.time - f.time) ? b : a))
+        if (Math.abs(near.time - f.time) > 10 * MINUTE) return null
+        return { key: `ctx:${near.path}`, url: `${rv.host}${near.path}/256/{z}/{x}/{y}/2/0_1.png` }
+      }),
+    [frames, rv],
+  )
+  const keysOf = useCallback((i: number) => [frameKey(frames[i]), contexts[i]?.key].filter((k): k is string => !!k), [frames, contexts])
 
   useEffect(() => {
     if (!box.current) return
@@ -124,6 +194,7 @@ function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }
     L.control.zoom({ position: 'topright' }).addTo(m)
     const esri = (kind: 'Base' | 'Reference') => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`
     L.tileLayer(esri('Base'), { attribution: 'Podklad © Esri, HERE, Garmin, © OpenStreetMap', maxZoom: 16 }).addTo(m)
+    m.createPane('veil').style.zIndex = '450'
     m.createPane('labels')
     const labels = m.getPane('labels')!
     labels.style.zIndex = '650'
@@ -137,82 +208,97 @@ function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }
       .bindTooltip(`Stanice ČHMÚ ${CHMI_STATION.name}`)
     map.current = m
     const store = layers.current
+    const veilStore = veils.current
     return () => {
       m.remove()
       map.current = null
       store.clear()
+      veilStore.clear()
+      setReady(new Set())
     }
   }, [])
 
-  // Vrstvy, které už na ose nejsou, odstranit
+  // Všechny vrstvy časové osy se vytvoří hned (neviditelné), aby se načetly dřív, než na ně animace dojde
   useEffect(() => {
-    const keep = new Set(frames.flatMap((f) => [`${f.kind}:${f.src}`, `ctx:${f.time}`]))
+    const m = map.current
+    if (!m) return
+    const mark = (key: string, on: boolean) =>
+      setReady((s) => {
+        if (s.has(key) === on) return s
+        const n = new Set(s)
+        if (on) n.add(key)
+        else n.delete(key)
+        return n
+      })
+    const addTiles = (key: string, url: string, mask: GeoBounds | null, zIndex: number) => {
+      const l = new RainViewerTiles(url, mask, { maxNativeZoom: RV_MAX_NATIVE_ZOOM, maxZoom: 11, opacity: 0, zIndex })
+      // Při posunu nebo zoomu se dlaždice stahují znovu → snímek není připravený, dokud nejsou všechny
+      l.on('loading', () => mark(key, false))
+      l.on('load', () => mark(key, true))
+      l.addTo(m)
+      layers.current.set(key, l)
+    }
+    const keep = new Set<string>()
+    frames.forEach((f, i) => {
+      const key = frameKey(f)
+      keep.add(key)
+      if (!layers.current.has(key)) {
+        if (f.kind === 'rv') addTiles(key, `${rv!.host}${f.src}/256/{z}/{x}/{y}/2/0_1.png`, null, 10)
+        else {
+          const overlay = L.imageOverlay(BLANK_GIF, leafletBounds(f.bounds!), { opacity: 0, zIndex: 10 })
+          overlay.addTo(m)
+          layers.current.set(key, overlay)
+          loadFrame(f.src)
+            .then((d) => {
+              overlay.once('load', () => mark(key, true))
+              overlay.setUrl(colorize(d))
+            })
+            // Nedostupný snímek nesmí zastavit animaci
+            .catch(() => mark(key, true))
+        }
+      }
+      const ctx = contexts[i]
+      if (ctx) {
+        keep.add(ctx.key)
+        if (!layers.current.has(ctx.key)) addTiles(ctx.key, ctx.url, CHMI_DATA_BOUNDS, 9)
+      }
+      const vk = veilKey(f)
+      if (vk && !veils.current.has(vk)) veils.current.set(vk, coverageVeil(f.bounds!, 'veil').addTo(m))
+    })
     for (const [k, l] of layers.current) {
       if (!keep.has(k)) {
         l.remove()
         layers.current.delete(k)
+        mark(k, false)
       }
     }
-  }, [frames])
+  }, [frames, contexts, rv])
 
-  // Aktuální snímek (vrstvy se tvoří až při prvním zobrazení, další snímek se načte dopředu)
+  // Zobrazit jen vrstvy aktuálního snímku
   useEffect(() => {
-    const m = map.current
-    if (!m || !frames.length) return
-    let cancelled = false
-    const ensure = (f: Frame): string => {
-      const key = `${f.kind}:${f.src}`
-      if (layers.current.has(key)) return key
-      if (f.kind === 'rv') {
-        const l = new RainViewerTiles(`${rv!.host}${f.src}/256/{z}/{x}/{y}/2/0_1.png`, null, { maxNativeZoom: RV_MAX_NATIVE_ZOOM, maxZoom: 11, opacity: 0, zIndex: 10 })
-        l.addTo(m)
-        layers.current.set(key, l)
-      } else {
-        // Obrázek se doplní po načtení; do té doby průhledný zástupce
-        const overlay = L.imageOverlay('data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==', leafletBounds(f.bounds!), { opacity: 0, zIndex: 10 })
-        overlay.addTo(m)
-        layers.current.set(key, overlay)
-        loadFrame(f.src)
-          .then((d) => overlay.setUrl(colorize(d)))
-          .catch(() => {})
-      }
-      return key
-    }
-    // RainViewer jako okolí mimo dosah ČHMÚ (jen u skutečných radarových snímků)
-    const ensureContext = (f: Frame): string | null => {
-      if (f.kind !== 'obs' || !rv?.frames.length) return null
-      const near = rv.frames.reduce((a, b) => (Math.abs(b.time - f.time) < Math.abs(a.time - f.time) ? b : a))
-      if (Math.abs(near.time - f.time) > 10 * MINUTE) return null
-      const key = `ctx:${f.time}`
-      if (!layers.current.has(key)) {
-        const l = new RainViewerTiles(`${rv.host}${near.path}/256/{z}/{x}/{y}/2/0_1.png`, CHMI_DATA_BOUNDS, {
-          maxNativeZoom: RV_MAX_NATIVE_ZOOM,
-          maxZoom: 11,
-          opacity: 0,
-          zIndex: 9,
-        })
-        l.addTo(m)
-        layers.current.set(key, l)
-      }
-      return key
-    }
-    const cur = frames[current]
-    const visible = new Set([ensure(cur), ensureContext(cur)])
-    if (current + 1 < frames.length) {
-      ensure(frames[current + 1])
-      ensureContext(frames[current + 1])
-    }
-    if (!cancelled) for (const [k, l] of layers.current) l.setOpacity(visible.has(k) ? OPACITY : 0)
-    return () => {
-      cancelled = true
-    }
-  }, [current, frames, rv])
+    if (!frames.length) return
+    const visible = new Set(keysOf(current))
+    for (const [k, l] of layers.current) l.setOpacity(visible.has(k) ? OPACITY : 0)
+    const vk = veilKey(frames[current])
+    for (const [k, v] of veils.current) v.setStyle(k === vk ? { opacity: 0.55, fillOpacity: 0.35 } : { opacity: 0, fillOpacity: 0 })
+  }, [current, frames, contexts, keysOf])
 
+  // Animace jde na další snímek, až když je načtený (nejvýš PLAY_MAX_WAIT kroků čekání)
   useEffect(() => {
     if (!playing || frames.length < 2) return
-    const id = setInterval(() => setFrame((f) => ((f ?? nowIndex) + 1) % frames.length), 450)
+    let waited = 0
+    let hold = 0
+    const id = setInterval(() => {
+      const cur = currentRef.current
+      if (cur === frames.length - 1 && hold++ < PLAY_END_HOLD) return
+      const next = (cur + 1) % frames.length
+      if (!keysOf(next).every((k) => readyRef.current.has(k)) && waited++ < PLAY_MAX_WAIT) return
+      waited = 0
+      hold = 0
+      setFrame(next)
+    }, PLAY_STEP_MS)
     return () => clearInterval(id)
-  }, [playing, frames.length, nowIndex])
+  }, [playing, frames.length, keysOf])
 
   const f = frames[current]
   const kinds = frames.map((x) => x.kind)
@@ -225,6 +311,7 @@ function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }
   })
   const total = Math.max(1, kinds.length - 1)
   const ahead = f.time - now
+  const curReady = keysOf(current).every((k) => ready.has(k))
   return (
     <div>
       <div className="relative -mx-4">
@@ -237,7 +324,14 @@ function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }
           </div>
           <div className="tabular text-lg leading-tight font-semibold">{formatMoment(f.time, now)}</div>
           {ahead > 5 * MINUTE && <div className="text-[11px] opacity-80">za {ahead < HOUR ? `${Math.round(ahead / MINUTE)} min` : `${num(ahead / HOUR, ahead < 10 * HOUR ? 1 : 0)} h`}</div>}
+          {f.kind === 'nowcast' && <div className="text-[11px] opacity-80">pokrývá jen Česko a okolí</div>}
         </div>
+        {!curReady && (
+          <div className="pointer-events-none absolute bottom-8 left-1/2 z-[700] flex -translate-x-1/2 items-center gap-2 rounded-full bg-black/65 px-3 py-1 text-xs text-white backdrop-blur">
+            <span className="h-3 w-3 animate-spin rounded-full border-2 border-white/30 border-t-white" />
+            Načítám snímek…
+          </div>
+        )}
       </div>
 
       <div className="mt-3 flex items-center gap-3">

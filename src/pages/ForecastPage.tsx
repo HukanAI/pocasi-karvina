@@ -67,10 +67,19 @@ function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number 
       xAxis: { type: 'category', data: days.map(({ t }, k) => (k < 2 ? dayName(t, k) : `${formatWeekdayShort(t)}\n${formatDayMonth(t)}`)), ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 9, interval: 1 } },
       yAxis: [
         { type: 'value', scale: true, ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 10, formatter: '{value}°' } },
-        { type: 'value', min: 0, max: (v: { max: number }) => Math.max(10, Math.ceil(v.max * 1.4)), ...axisStyle(c), splitLine: { show: false }, axisLabel: { show: false } },
+        // Šance na srážky 0–100 %; osa do 160, aby sloupce nepřekrývaly teplotní čáry
+        { type: 'value', min: 0, max: 160, ...axisStyle(c), splitLine: { show: false }, axisLabel: { show: false } },
       ],
       series: [
-        { name: 'Srážky (mm)', type: 'bar', yAxisIndex: 1, data: days.map(({ i }) => d.precipitation_sum[i]), itemStyle: { color: c.rain, opacity: 0.45, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 10 },
+        {
+          name: 'Šance na srážky (%)',
+          type: 'bar',
+          yAxisIndex: 1,
+          // Stejný údaj jako v seznamu dní; dny pod 10 % se nekreslí (v seznamu také chybí)
+          data: days.map(({ i }) => ((d.precipitation_probability_max[i] ?? 0) >= 10 ? d.precipitation_probability_max[i] : null)),
+          itemStyle: { color: c.rain, opacity: 0.45, borderRadius: [3, 3, 0, 0] },
+          barMaxWidth: 10,
+        },
         { name: 'Max', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }) => d.temperature_2m_max[i]), lineStyle: { color: c.warm, width: 2.5 }, itemStyle: { color: c.warm } },
         { name: 'Min', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }) => d.temperature_2m_min[i]), lineStyle: { color: c.cold, width: 2.5 }, itemStyle: { color: c.cold } },
       ],
@@ -89,7 +98,7 @@ function DailyList({ f, updatedAt, error }: { f: Forecast; updatedAt: number; er
 
   return (
     <>
-      <Card title="Teploty a srážky na 16 dní" subtitle="Oranžová = nejvyšší denní teplota, modrá = noční minimum, sloupce = srážky">
+      <Card title="Teploty a srážky na 16 dní" subtitle="Oranžová = nejvyšší denní teplota, modrá = noční minimum, sloupce = šance na srážky">
         <OverviewChart f={f} days={days} />
       </Card>
       <Card title="Předpověď po dnech" subtitle="Klepnutím na den zobrazíte průběh po hodinách" pad={false} className="pb-2">

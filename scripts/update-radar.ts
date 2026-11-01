@@ -29,9 +29,12 @@ const FCT_DIR = `${CHMI}/radar/composite/fct_pseudocappi2km/png/`
 const ALADIN_DIR = `${CHMI}/nwp_aladin/Lambert_2.3km/`
 const OBS_KEEP_MS = 2 * 3_600_000 + 5 * 60_000
 const MODEL_HOURS = 24
-/** Oblast modelu: okolí Karviné včetně Polska a Slovenska, ~2,3 km na pixel */
-export const MODEL_BOUNDS: Bounds = { south: 47.0, west: 12.0, north: 52.5, east: 24.0 }
-const MODEL_WIDTH = 400
+/**
+ * Oblast modelu: střední Evropa (celá leží uvnitř domény ALADIN 2,3 km), ~2,2 km na pixel.
+ * Musí být velká, aby při oddálení mapy předpověď nekončila ostrou hranou kousek za Českem.
+ */
+export const MODEL_BOUNDS: Bounds = { south: 44.0, west: 6.0, north: 55.0, east: 28.0 }
+const MODEL_WIDTH = 740
 
 const RADAR = 'radar'
 const dir = (...p: string[]) => dataPath(join(RADAR, ...p))
@@ -168,7 +171,8 @@ async function downloadAccumulations(url: string): Promise<{ grid: Grid; referen
 async function updateModel(now: number, prev: RadarIndex | null): Promise<RadarIndex['model']> {
   const latest = await latestAladinRun()
   if (!latest) return prev?.model ?? null
-  const fresh = prev?.model?.run === latest.run && prev.model.frames.every((f) => existsSync(dataPath(f.file)))
+  const sameArea = JSON.stringify(prev?.model?.bounds) === JSON.stringify(MODEL_BOUNDS)
+  const fresh = prev?.model?.run === latest.run && sameArea && prev.model.frames.every((f) => existsSync(dataPath(f.file)))
   // Při stejném běhu jen odstranit snímky z minulosti
   if (fresh) {
     const frames = prev!.model!.frames.filter((f) => f.t >= now - 3_600_000)
