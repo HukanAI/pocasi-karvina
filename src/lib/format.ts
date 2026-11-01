@@ -40,6 +40,14 @@ export function windDir(deg: number | null | undefined): string {
   return DIRS_8[Math.round((((deg % 360) + 360) % 360) / 45) % 8]
 }
 
+const DIRS_8_FROM = ['severu', 'severovýchodu', 'východu', 'jihovýchodu', 'jihu', 'jihozápadu', 'západu', 'severozápadu'] as const
+
+/** „od severovýchodu“ – odkud vítr vane, 2. pád */
+export function windFrom(deg: number | null | undefined): string {
+  if (deg == null || !Number.isFinite(deg)) return '–'
+  return DIRS_8_FROM[Math.round((((deg % 360) + 360) % 360) / 45) % 8]
+}
+
 export function windDirLong(deg: number | null | undefined): string {
   if (deg == null || !Number.isFinite(deg)) return '–'
   return DIRS_8_LONG[Math.round((((deg % 360) + 360) % 360) / 45) % 8]

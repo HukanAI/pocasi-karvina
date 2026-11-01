@@ -410,7 +410,15 @@ function Trend({ s, yearly }: { s: DailySeries; yearly: ReturnType<typeof yearly
       grid: { left: 4, right: 4, top: 28, bottom: 4, outerBoundsMode: 'same', outerBoundsContain: 'axisLabel' },
       legend: { top: 0, textStyle: { color: c.muted, fontSize: 11 }, itemWidth: 12, itemHeight: 6 },
       tooltip: { ...(baseOption(c).tooltip as object), valueFormatter: (v) => (typeof v === 'number' ? `${num(v, 2)} °C` : '–') },
-      xAxis: { type: 'value', min: first, max: shown[shown.length - 1]?.year, ...axisStyle(c), splitLine: { show: false }, axisLabel: { color: c.muted, fontSize: 10, formatter: (v: number) => String(v) } },
+      xAxis: {
+        type: 'value',
+        min: first,
+        max: shown[shown.length - 1]?.year,
+        ...axisStyle(c),
+        splitLine: { show: false },
+        // Jen kulaté roky – krajní hodnoty (např. 1877) by se s nimi překrývaly
+        axisLabel: { color: c.muted, fontSize: 10, showMinLabel: false, showMaxLabel: false, formatter: (v: number) => String(v) },
+      },
       yAxis: { type: 'value', scale: true, ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 10, formatter: '{value}°' } },
       series: [
         { name: 'Roční průměr', type: 'line', data: shown.map((r) => [r.year, r.tmean]), connectNulls: false, symbolSize: 3, lineStyle: { color: c.warm, width: 1.5 }, itemStyle: { color: c.warm } },

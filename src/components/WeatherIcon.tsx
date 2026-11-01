@@ -1,7 +1,7 @@
 // Ikony Meteocons (Bas Milius, MIT). Do sestavení se zabalí jen vyjmenované ikony.
 
 const ICONS = import.meta.glob(
-  '/node_modules/@bybas/weather-icons/production/fill/all/{clear-day,clear-night,partly-cloudy-day,partly-cloudy-night,overcast-day,overcast-night,fog-day,fog-night,fog,partly-cloudy-day-drizzle,partly-cloudy-night-drizzle,drizzle,sleet,partly-cloudy-day-rain,partly-cloudy-night-rain,rain,partly-cloudy-day-snow,partly-cloudy-night-snow,snow,thunderstorms-day-rain,thunderstorms-night-rain,thunderstorms-rain,not-available,sunrise,sunset,moonrise,moonset,moon-new,moon-waxing-crescent,moon-first-quarter,moon-waxing-gibbous,moon-full,moon-waning-gibbous,moon-last-quarter,moon-waning-crescent,raindrops,raindrop,umbrella,thermometer,humidity,barometer,wind,uv-index,compass,horizon,smoke-particles,snowflake,windsock,star}.svg',
+  '/node_modules/@bybas/weather-icons/production/fill/all/{clear-day,clear-night,partly-cloudy-day,partly-cloudy-night,overcast,overcast-day,overcast-night,fog-day,fog-night,fog,partly-cloudy-day-drizzle,partly-cloudy-night-drizzle,drizzle,sleet,partly-cloudy-day-rain,partly-cloudy-night-rain,rain,partly-cloudy-day-snow,partly-cloudy-night-snow,snow,thunderstorms-day-rain,thunderstorms-night-rain,thunderstorms-rain,not-available,sunrise,sunset,moonrise,moonset,moon-new,moon-waxing-crescent,moon-first-quarter,moon-waxing-gibbous,moon-full,moon-waning-gibbous,moon-last-quarter,moon-waning-crescent,raindrops,raindrop,umbrella,thermometer,humidity,barometer,wind,uv-index,compass,horizon,smoke-particles,snowflake,windsock,star}.svg',
   { query: '?url', import: 'default', eager: true },
 ) as Record<string, string>
 

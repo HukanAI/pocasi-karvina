@@ -60,9 +60,7 @@ export function Hero() {
         Pocitově {tempShort(c.apparent_temperature)} · max {tempShort(tmax)} · min {tempShort(tmin)}
       </p>
       <p className="mt-1 text-[11px] text-faint">
-        {fresh
-          ? `Teplota naměřena na stanici ČHMÚ Karviná v ${formatTime(st.data!.last!.t)} (${formatAgo(st.data!.last!.t, now)})`
-          : `Teplota z modelu Open-Meteo (${formatTime(f.data.currentTime)})${st.data?.last ? `; poslední měření ČHMÚ je z ${formatTime(st.data.last.t)}` : ''}`}
+        {fresh ? `Naměřeno ČHMÚ Karviná · ${formatTime(st.data!.last!.t)} (${formatAgo(st.data!.last!.t, now)})` : `Model Open-Meteo · ${formatTime(f.data.currentTime)}`}
       </p>
       {anomaly != null && (
         <Pill

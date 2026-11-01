@@ -61,6 +61,10 @@ jobs:
         continue-on-error: true
         run: node scripts/fetch-warnings.ts
 
+      - name: Radar a předpověď srážek ČHMÚ (radar, nowcasting, model ALADIN)
+        continue-on-error: true
+        run: node scripts/update-radar.ts
+
       - name: Klimatické řady (když jsou starší než 20 h nebo na vyžádání)
         continue-on-error: true
         run: |
@@ -85,13 +89,19 @@ jobs:
       - name: Uložení do větve data
         working-directory: data-branch
         run: |
-          rm -rf .git
-          git init -q -b data
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git add -A
-          git commit -q -m "Data $(date -u +'%Y-%m-%d %H:%M') UTC"
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data
+          git config --global user.name "github-actions[bot]"
+          git config --global user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          # Jediný commit, který se přepisuje (historie neroste). Při existující větvi „amend“ –
+          # git pak odešle jen změněné soubory, ne celých několik MB dat při každém běhu.
+          if [ -d .git ]; then
+            git add -A
+            git commit -q --amend --no-edit --date=now -m "Data $(date -u +'%Y-%m-%d %H:%M') UTC"
+          else
+            git init -q -b data
+            git add -A
+            git commit -q -m "Data $(date -u +'%Y-%m-%d %H:%M') UTC"
+          fi
+          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:data
           ls -la
 
       - name: Udržení workflow v chodu

@@ -73,31 +73,39 @@ export function AstroCard() {
   const moon = moonInfo(now)
   const progress = sun.sunrise && sun.sunset ? Math.min(1, Math.max(0, (now - sun.sunrise) / (sun.sunset - sun.sunrise))) : 0
   const up = sun.sunrise != null && sun.sunset != null && now > sun.sunrise && now < sun.sunset
-  // Poloha slunce na oblouku
+  // Poloha slunce na oblouku (elipsa přes celou šířku, konce oblouku = okraje karty)
   const ang = Math.PI * (1 - progress)
-  const sx = 50 + 42 * Math.cos(ang)
-  const sy = 50 - 42 * Math.sin(ang)
+  const sx = 150 + 140 * Math.cos(ang)
+  const sy = 78 - 68 * Math.sin(ang)
   return (
     <Card title="Slunce a Měsíc">
-      <svg viewBox="0 0 100 56" className="mx-auto h-24 w-full max-w-xs" aria-hidden="true">
-        <path d="M8 50 A42 42 0 0 1 92 50" fill="none" stroke="currentColor" strokeOpacity="0.25" strokeDasharray="2 2" />
-        <line x1="2" y1="50" x2="98" y2="50" stroke="currentColor" strokeOpacity="0.3" />
-        {up && <circle cx={sx} cy={sy} r="4.5" fill="#fbbf24" stroke="#f59e0b" />}
+      <svg viewBox="0 0 300 84" className="block h-auto w-full" aria-hidden="true">
+        <defs>
+          <linearGradient id="dayArc" x1="0" x2="1">
+            <stop offset="0" stopColor="#fb923c" />
+            <stop offset="0.5" stopColor="#fbbf24" />
+            <stop offset="1" stopColor="#fb923c" />
+          </linearGradient>
+        </defs>
+        <path d="M10 78 A140 68 0 0 1 290 78" fill="none" stroke="currentColor" strokeOpacity="0.2" strokeWidth="1.5" strokeDasharray="3 4" />
+        {up && <path d={`M10 78 A140 68 0 0 1 ${sx.toFixed(1)} ${sy.toFixed(1)}`} fill="none" stroke="url(#dayArc)" strokeWidth="2.5" strokeLinecap="round" />}
+        <line x1="0" y1="78" x2="300" y2="78" stroke="currentColor" strokeOpacity="0.3" />
+        {up && <circle cx={sx} cy={sy} r="8" fill="#fbbf24" stroke="#fff" strokeWidth="2" />}
       </svg>
-      <div className="grid grid-cols-2 gap-3">
-        <div className="flex items-center gap-2">
-          <WeatherIcon name="sunrise" size={40} />
+      <div className="mt-2 flex items-end justify-between">
+        <div className="flex items-center gap-1.5">
+          <WeatherIcon name="sunrise" size={36} />
           <div>
             <div className="text-xs text-muted">Východ</div>
-            <div className="tabular font-semibold">{sun.sunrise ? formatTime(sun.sunrise) : '–'}</div>
+            <div className="tabular text-lg leading-tight font-semibold">{sun.sunrise ? formatTime(sun.sunrise) : '–'}</div>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <WeatherIcon name="sunset" size={40} />
+        <div className="flex items-center gap-1.5 text-right">
           <div>
             <div className="text-xs text-muted">Západ</div>
-            <div className="tabular font-semibold">{sun.sunset ? formatTime(sun.sunset) : '–'}</div>
+            <div className="tabular text-lg leading-tight font-semibold">{sun.sunset ? formatTime(sun.sunset) : '–'}</div>
           </div>
+          <WeatherIcon name="sunset" size={36} />
         </div>
       </div>
       <dl className="mt-3 grid grid-cols-2 gap-x-3 gap-y-1.5 text-sm">

@@ -26,25 +26,19 @@ export interface Pollutant {
   key: 'pm10' | 'pm2_5' | 'nitrogen_dioxide' | 'ozone' | 'sulphur_dioxide'
   name: string
   short: string
-  /** Hranice pásem EAQI pro hodinové koncentrace (µg/m³), stejné pořadí jako EAQI_BANDS */
-  bands: number[]
+  /** Limit pro zdraví (µg/m³) k vykreslení v grafu */
+  limitValue: number
   /** Zákonný limit (popis) */
   limit: string
 }
 
 export const POLLUTANTS: Pollutant[] = [
-  { key: 'pm10', name: 'Prachové částice PM10', short: 'PM10', bands: [20, 40, 50, 100, 150], limit: 'Denní imisní limit 50 µg/m³ (max. 35× ročně)' },
-  { key: 'pm2_5', name: 'Jemné částice PM2,5', short: 'PM2,5', bands: [10, 20, 25, 50, 75], limit: 'Roční limit 20 µg/m³, od 2030 denní 25 µg/m³' },
-  { key: 'nitrogen_dioxide', name: 'Oxid dusičitý', short: 'NO₂', bands: [40, 90, 120, 230, 340], limit: 'Hodinový limit 200 µg/m³' },
-  { key: 'ozone', name: 'Přízemní ozon', short: 'O₃', bands: [50, 100, 130, 240, 380], limit: 'Cílová hodnota 120 µg/m³ (8h průměr)' },
-  { key: 'sulphur_dioxide', name: 'Oxid siřičitý', short: 'SO₂', bands: [100, 200, 350, 500, 750], limit: 'Hodinový limit 350 µg/m³' },
+  { key: 'pm10', name: 'Prachové částice PM10', short: 'PM10', limitValue: 50, limit: 'Denní imisní limit 50 µg/m³ (max. 35× ročně)' },
+  { key: 'pm2_5', name: 'Jemné částice PM2,5', short: 'PM2,5', limitValue: 25, limit: 'Roční limit 20 µg/m³, od 2030 denní 25 µg/m³' },
+  { key: 'nitrogen_dioxide', name: 'Oxid dusičitý', short: 'NO₂', limitValue: 200, limit: 'Hodinový limit 200 µg/m³' },
+  { key: 'ozone', name: 'Přízemní ozon', short: 'O₃', limitValue: 120, limit: 'Cílová hodnota 120 µg/m³ (8h průměr)' },
+  { key: 'sulphur_dioxide', name: 'Oxid siřičitý', short: 'SO₂', limitValue: 350, limit: 'Hodinový limit 350 µg/m³' },
 ]
-
-export function pollutantBand(p: Pollutant, v: number | null | undefined): Band | null {
-  if (v == null || !Number.isFinite(v)) return null
-  const i = p.bands.findIndex((b) => v <= b)
-  return EAQI_BANDS[i === -1 ? EAQI_BANDS.length - 1 : i]
-}
 
 export interface PollenType {
   key: 'alder_pollen' | 'birch_pollen' | 'grass_pollen' | 'mugwort_pollen' | 'ragweed_pollen'

@@ -9,12 +9,13 @@ import { StationCard } from '../components/today/StationCard.tsx'
 export default function TodayPage() {
   return (
     <div className="space-y-3 pb-4">
-      <Hero />
-      <InstallCard compact />
+      {/* Výstrahy ČHMÚ jsou výjimečné, ale když platí, musí být vidět jako první */}
       <WarningsBanner />
-      <RainCard />
+      <Hero />
       <HourlyStrip />
       <Nowcast />
+      <RainCard />
+      <InstallCard compact />
       <StationCard />
       <DetailTiles />
       <AstroCard />

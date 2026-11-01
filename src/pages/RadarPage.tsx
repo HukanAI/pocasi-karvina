@@ -1,34 +1,75 @@
-// Radar srážek ve stylu Windy: tmavá mapa, vlastní paleta, jedna časová osa
-// – minulost: skutečný radar RainViewer (dlaždice přebarvené z hodnot dBZ),
-// – budoucnost: předpověď srážek modelu z mřížky bodů Open-Meteo (stejná paleta).
+// Radar srážek ve stylu Windy – jedna časová osa ze tří zdrojů ČHMÚ:
+//   minulost:   radar ČHMÚ pseudoCAPPI 2 km (1 km, po 5 min) + RainViewer jako okolí mimo dosah ČHMÚ
+//   +10–60 min: nowcasting ČHMÚ (COTREC – posun skutečných srážkových buněk)
+//   +1–24 h:    model ČHMÚ ALADIN 2,3 km (hodinová intenzita srážek)
+// Všechno se kreslí stejnou paletou podle intenzity (dBZ).
 
 import 'leaflet/dist/leaflet.css'
 import L from 'leaflet'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import type { RadarData } from '../api/dataBranch.ts'
+import { colorize, type FrameData, leafletBounds, loadFrame, maxDbzNear } from '../components/radar/frames.ts'
 import { Card, ErrorCard, LoadingCard, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, LOCATION } from '../config.ts'
 import { num } from '../lib/format.ts'
-import { gridBounds, type PrecipGrid, renderGridFrame } from '../lib/precipGrid.ts'
-import { LEGEND_DBZ_RANGE, LEGEND_MMH, legendGradient, mmhToDbz, recolorRainViewer } from '../lib/radarPalette.ts'
+import { CHMI_DATA_BOUNDS, type GeoBounds, mercY, type RadarIndex } from '../lib/radarData.ts'
+import { dbzToMmh, LEGEND_DBZ_RANGE, LEGEND_MMH, legendGradient, mmhToDbz, recolorRainViewer } from '../lib/radarPalette.ts'
 import { formatAgo, formatMoment, formatTime, HOUR, MINUTE } from '../lib/time.ts'
 import { useNow } from '../state/derived.ts'
-import { useForecast, usePrecipGrid, useRadar } from '../state/queries.ts'
+import { useForecast, useRadar, useRadarIndex } from '../state/queries.ts'
 
 /** RainViewer poskytuje dlaždice jen do zoomu 7 (vyšší vrací „Zoom Level Not Supported“) */
-const RADAR_MAX_NATIVE_ZOOM = 7
-const FORECAST_HOURS = 12
-const FORECAST_STEP = 30 * MINUTE
+const RV_MAX_NATIVE_ZOOM = 7
+const MODEL_HOURS = 24
+const OPACITY = 0.85
 
-type Frame = { kind: 'radar'; time: number; path: string } | { kind: 'model'; time: number; index: number }
+type Kind = 'obs' | 'rv' | 'nowcast' | 'model'
+interface Frame {
+  kind: Kind
+  time: number
+  /** Soubor v data větvi (obs, nowcast, model) nebo cesta RainViewer (rv) */
+  src: string
+  bounds?: GeoBounds
+}
 
-/** Dlaždice RainViewer přebarvené paletou Windy (barva → dBZ → nová barva) */
-class RadarTiles extends L.GridLayer {
+const KIND_INFO: Record<Kind, { label: string; color: string }> = {
+  obs: { label: 'Radar ČHMÚ · skutečnost', color: '#38bdf8' },
+  rv: { label: 'Radar · skutečnost', color: '#38bdf8' },
+  nowcast: { label: 'Nowcasting ČHMÚ', color: '#2dd4bf' },
+  model: { label: 'Předpověď modelu ALADIN', color: '#a78bfa' },
+}
+
+function buildFrames(idx: RadarIndex | undefined, rv: RadarData | undefined, now: number): Frame[] {
+  const frames: Frame[] = []
+  if (idx?.obs?.frames.length) {
+    for (const f of idx.obs.frames) frames.push({ kind: 'obs', time: f.t, src: f.file, bounds: idx.obs.bounds })
+  } else if (rv) {
+    for (const f of rv.frames) frames.push({ kind: 'rv', time: f.time, src: f.path })
+  }
+  let last = frames.length ? frames[frames.length - 1].time : now - 5 * MINUTE
+  if (idx?.nowcast) {
+    for (const f of idx.nowcast.frames) if (f.t > last) frames.push({ kind: 'nowcast', time: f.t, src: f.file, bounds: idx.nowcast.bounds })
+    last = frames[frames.length - 1]?.time ?? last
+  }
+  if (idx?.model) {
+    for (const f of idx.model.frames) if (f.t > last + 20 * MINUTE && f.t <= now + MODEL_HOURS * HOUR) frames.push({ kind: 'model', time: f.t, src: f.file, bounds: idx.model.bounds })
+  }
+  return frames
+}
+
+const worldPx = (z: number) => 256 * 2 ** z
+const tileX = (lon: number, z: number) => ((lon + 180) / 360) * worldPx(z)
+const tileY = (lat: number, z: number) => ((1 - mercY(lat) / Math.PI) / 2) * worldPx(z)
+
+/** Dlaždice RainViewer přebarvené stejnou paletou; volitelně s vyříznutou oblastí, kterou pokrývá radar ČHMÚ */
+class RainViewerTiles extends L.GridLayer {
   url: string
+  mask: GeoBounds | null
 
-  constructor(url: string, options: L.GridLayerOptions) {
+  constructor(url: string, mask: GeoBounds | null, options: L.GridLayerOptions) {
     super(options)
     this.url = url
+    this.mask = mask
   }
 
   createTile(coords: L.Coords, done: L.DoneCallback): HTMLElement {
@@ -43,58 +84,43 @@ class RadarTiles extends L.GridLayer {
         const data = ctx.getImageData(0, 0, 256, 256)
         recolorRainViewer(data.data)
         ctx.putImageData(data, 0, 0)
+        if (this.mask) {
+          const x0 = tileX(this.mask.west, coords.z) - coords.x * 256
+          const x1 = tileX(this.mask.east, coords.z) - coords.x * 256
+          const y0 = tileY(this.mask.north, coords.z) - coords.y * 256
+          const y1 = tileY(this.mask.south, coords.z) - coords.y * 256
+          ctx.clearRect(x0, y0, x1 - x0, y1 - y0)
+        }
         done(undefined, tile)
       } catch (e) {
         done(e as Error, tile)
       }
     }
     img.onerror = () => done(new Error('Radarová dlaždice nedostupná'), tile)
-    // 0_1 = bez vyhlazení (přesné barvy pro převod na dBZ), se sněhem
     img.src = this.url.replace('{z}', String(coords.z)).replace('{x}', String(coords.x)).replace('{y}', String(coords.y))
     return tile
   }
 }
 
-function gridFrameUrl(grid: PrecipGrid, index: number): string {
-  const { width, height, data } = renderGridFrame(grid, index, 24)
-  const c = document.createElement('canvas')
-  c.width = width
-  c.height = height
-  c.getContext('2d')!.putImageData(new ImageData(data, width, height), 0, 0)
-  return c.toDataURL('image/png')
-}
+type OpacityLayer = L.Layer & { setOpacity: (o: number) => unknown }
 
-function buildFrames(radar: RadarData | undefined, grid: PrecipGrid | undefined, now: number): Frame[] {
-  const frames: Frame[] = (radar?.frames ?? []).map((f) => ({ kind: 'radar', time: f.time, path: f.path }))
-  const lastRadar = frames.length ? frames[frames.length - 1].time : now
-  if (grid) {
-    grid.times.forEach((t, index) => {
-      if (t > lastRadar && t <= now + FORECAST_HOURS * HOUR && t % FORECAST_STEP === 0) frames.push({ kind: 'model', time: t, index })
-    })
-  }
-  return frames
-}
-
-function RadarMap({ radar, grid }: { radar: RadarData | undefined; grid: PrecipGrid | undefined }) {
+function RadarMap({ frames, rv }: { frames: Frame[]; rv: RadarData | undefined }) {
   const now = useNow(60_000)
   const box = useRef<HTMLDivElement>(null)
   const map = useRef<L.Map | null>(null)
-  const layers = useRef(new Map<string, L.Layer & { setOpacity: (o: number) => unknown }>())
-  const areaRect = useRef<L.Rectangle | null>(null)
-  const frames = useMemo(() => buildFrames(radar, grid, now), [radar, grid, now])
+  const layers = useRef(new Map<string, OpacityLayer>())
   const nowIndex = useMemo(() => {
-    let i = -1
-    frames.forEach((f, k) => f.kind === 'radar' && (i = k))
-    return Math.max(0, i)
+    let i = 0
+    frames.forEach((f, k) => (f.kind === 'obs' || f.kind === 'rv') && (i = k))
+    return i
   }, [frames])
   const [frame, setFrame] = useState<number | null>(null)
   const [playing, setPlaying] = useState(false)
   const current = Math.min(frame ?? nowIndex, frames.length - 1)
 
-  // Mapa – vždy tmavá jako ve Windy
   useEffect(() => {
     if (!box.current) return
-    const m = L.map(box.current, { center: [LOCATION.latitude, LOCATION.longitude], zoom: 7, minZoom: 5, maxZoom: 10, zoomControl: false })
+    const m = L.map(box.current, { center: [LOCATION.latitude, LOCATION.longitude], zoom: 8, minZoom: 5, maxZoom: 11, zoomControl: false })
     L.control.zoom({ position: 'topright' }).addTo(m)
     const esri = (kind: 'Base' | 'Reference') => `https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_${kind}/MapServer/tile/{z}/{y}/{x}`
     L.tileLayer(esri('Base'), { attribution: 'Podklad © Esri, HERE, Garmin, © OpenStreetMap', maxZoom: 16 }).addTo(m)
@@ -115,77 +141,102 @@ function RadarMap({ radar, grid }: { radar: RadarData | undefined; grid: PrecipG
       m.remove()
       map.current = null
       store.clear()
-      areaRect.current = null
     }
   }, [])
 
-  // Při nových datech zahodit vrstvy, které už na ose nejsou
+  // Vrstvy, které už na ose nejsou, odstranit
   useEffect(() => {
-    const keep = new Set(frames.map((f) => (f.kind === 'radar' ? `r:${f.path}` : `m:${f.time}:${grid?.times[0]}`)))
+    const keep = new Set(frames.flatMap((f) => [`${f.kind}:${f.src}`, `ctx:${f.time}`]))
     for (const [k, l] of layers.current) {
       if (!keep.has(k)) {
         l.remove()
         layers.current.delete(k)
       }
     }
-  }, [frames, grid])
+  }, [frames])
 
-  // Zobrazení aktuálního snímku; vrstvy se vytvářejí až při prvním zobrazení a další snímek se načte dopředu
+  // Aktuální snímek (vrstvy se tvoří až při prvním zobrazení, další snímek se načte dopředu)
   useEffect(() => {
     const m = map.current
     if (!m || !frames.length) return
-    const ensure = (f: Frame) => {
-      const key = f.kind === 'radar' ? `r:${f.path}` : `m:${f.time}:${grid?.times[0]}`
-      let l = layers.current.get(key)
-      if (!l) {
-        if (f.kind === 'radar') {
-          l = new RadarTiles(`${radar!.host}${f.path}/256/{z}/{x}/{y}/2/0_1.png`, {
-            maxNativeZoom: RADAR_MAX_NATIVE_ZOOM,
-            maxZoom: 10,
-            opacity: 0,
-            zIndex: 10,
-            attribution: '<a href="https://www.rainviewer.com/">RainViewer</a>',
-          })
-        } else {
-          l = L.imageOverlay(gridFrameUrl(grid!, f.index), gridBounds(grid!), { opacity: 0, zIndex: 10, attribution: 'Předpověď Open-Meteo' })
-        }
+    let cancelled = false
+    const ensure = (f: Frame): string => {
+      const key = `${f.kind}:${f.src}`
+      if (layers.current.has(key)) return key
+      if (f.kind === 'rv') {
+        const l = new RainViewerTiles(`${rv!.host}${f.src}/256/{z}/{x}/{y}/2/0_1.png`, null, { maxNativeZoom: RV_MAX_NATIVE_ZOOM, maxZoom: 11, opacity: 0, zIndex: 10 })
+        l.addTo(m)
+        layers.current.set(key, l)
+      } else {
+        // Obrázek se doplní po načtení; do té doby průhledný zástupce
+        const overlay = L.imageOverlay('data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==', leafletBounds(f.bounds!), { opacity: 0, zIndex: 10 })
+        overlay.addTo(m)
+        layers.current.set(key, overlay)
+        loadFrame(f.src)
+          .then((d) => overlay.setUrl(colorize(d)))
+          .catch(() => {})
+      }
+      return key
+    }
+    // RainViewer jako okolí mimo dosah ČHMÚ (jen u skutečných radarových snímků)
+    const ensureContext = (f: Frame): string | null => {
+      if (f.kind !== 'obs' || !rv?.frames.length) return null
+      const near = rv.frames.reduce((a, b) => (Math.abs(b.time - f.time) < Math.abs(a.time - f.time) ? b : a))
+      if (Math.abs(near.time - f.time) > 10 * MINUTE) return null
+      const key = `ctx:${f.time}`
+      if (!layers.current.has(key)) {
+        const l = new RainViewerTiles(`${rv.host}${near.path}/256/{z}/{x}/{y}/2/0_1.png`, CHMI_DATA_BOUNDS, {
+          maxNativeZoom: RV_MAX_NATIVE_ZOOM,
+          maxZoom: 11,
+          opacity: 0,
+          zIndex: 9,
+        })
         l.addTo(m)
         layers.current.set(key, l)
       }
       return key
     }
-    const curKey = ensure(frames[current])
-    if (current + 1 < frames.length) ensure(frames[current + 1])
-    for (const [k, l] of layers.current) l.setOpacity(k === curKey ? 0.9 : 0)
-
-    // Obrys oblasti modelové předpovědi
-    if (frames[current].kind === 'model' && grid) {
-      areaRect.current ??= L.rectangle(gridBounds(grid), { color: '#ffffff', weight: 1, opacity: 0.35, dashArray: '4 6', fill: false, interactive: false }).addTo(m)
-    } else {
-      areaRect.current?.remove()
-      areaRect.current = null
+    const cur = frames[current]
+    const visible = new Set([ensure(cur), ensureContext(cur)])
+    if (current + 1 < frames.length) {
+      ensure(frames[current + 1])
+      ensureContext(frames[current + 1])
     }
-  }, [current, frames, radar, grid])
+    if (!cancelled) for (const [k, l] of layers.current) l.setOpacity(visible.has(k) ? OPACITY : 0)
+    return () => {
+      cancelled = true
+    }
+  }, [current, frames, rv])
 
   useEffect(() => {
     if (!playing || frames.length < 2) return
-    const id = setInterval(() => setFrame((f) => ((f ?? nowIndex) + 1) % frames.length), 550)
+    const id = setInterval(() => setFrame((f) => ((f ?? nowIndex) + 1) % frames.length), 450)
     return () => clearInterval(id)
   }, [playing, frames.length, nowIndex])
 
-  if (!frames.length) return null
   const f = frames[current]
-  const firstModel = frames.findIndex((x) => x.kind === 'model')
-  const radarShare = firstModel === -1 ? 100 : (firstModel / Math.max(1, frames.length - 1)) * 100
-
+  const kinds = frames.map((x) => x.kind)
+  const segments: { kind: Kind; share: number }[] = []
+  kinds.forEach((k, i) => {
+    if (i === kinds.length - 1) return
+    const last = segments[segments.length - 1]
+    if (last && last.kind === k) last.share++
+    else segments.push({ kind: k, share: 1 })
+  })
+  const total = Math.max(1, kinds.length - 1)
+  const ahead = f.time - now
   return (
     <div>
-      <div className="relative">
-        <div ref={box} className="h-[58vh] min-h-[340px] w-full overflow-hidden rounded-2xl bg-[#1d1f22]" />
-        {/* Štítek času jako ve Windy */}
-        <div className="pointer-events-none absolute top-3 left-3 z-[700] rounded-xl bg-black/60 px-3 py-1.5 text-white backdrop-blur">
-          <div className="text-[10px] font-semibold tracking-wider uppercase opacity-80">{f.kind === 'radar' ? 'Radar · skutečnost' : 'Předpověď modelu'}</div>
+      <div className="relative -mx-4">
+        {/* Pozadí v barvě podkladu: případné subpixelové mezery mezi dlaždicemi pak nejsou vidět (Leaflet jinak dává #ddd) */}
+        <div ref={box} className="h-[60vh] min-h-[360px] w-full" style={{ background: "#474749" }} />
+        <div className="pointer-events-none absolute top-3 left-3 z-[700] rounded-xl bg-black/65 px-3 py-1.5 text-white backdrop-blur">
+          <div className="flex items-center gap-1.5 text-[10px] font-semibold tracking-wider uppercase">
+            <span className="h-2 w-2 rounded-full" style={{ background: KIND_INFO[f.kind].color }} />
+            {KIND_INFO[f.kind].label}
+          </div>
           <div className="tabular text-lg leading-tight font-semibold">{formatMoment(f.time, now)}</div>
+          {ahead > 5 * MINUTE && <div className="text-[11px] opacity-80">za {ahead < HOUR ? `${Math.round(ahead / MINUTE)} min` : `${num(ahead / HOUR, ahead < 10 * HOUR ? 1 : 0)} h`}</div>}
         </div>
       </div>
 
@@ -207,11 +258,11 @@ function RadarMap({ radar, grid }: { radar: RadarData | undefined; grid: PrecipG
             </svg>
           )}
         </button>
-        <div className="flex-1">
-          {/* Pruh časové osy: radar (plná) a předpověď (šrafovaná) – zarovnaný s posuvníkem */}
+        <div className="min-w-0 flex-1">
           <div className="mx-[8px] flex h-1.5 overflow-hidden rounded-full">
-            <div className="h-full bg-sky-400/70" style={{ width: `${radarShare}%` }} />
-            <div className="h-full flex-1" style={{ background: 'repeating-linear-gradient(90deg, rgba(167,139,250,.75) 0 6px, rgba(167,139,250,.25) 6px 10px)' }} />
+            {segments.map((s, i) => (
+              <div key={i} className="h-full" style={{ width: `${(s.share / total) * 100}%`, background: KIND_INFO[s.kind].color, opacity: s.kind === 'model' ? 0.75 : 0.9 }} />
+            ))}
           </div>
           <input
             type="range"
@@ -225,20 +276,25 @@ function RadarMap({ radar, grid }: { radar: RadarData | undefined; grid: PrecipG
             className="w-full accent-[var(--accent)]"
             aria-label="Čas snímku"
           />
-          <div className="flex justify-between text-[10px] text-faint">
-            <span>
-              {formatTime(frames[0].time)} <span className="text-sky-500">radar</span>
-            </span>
-            <button type="button" className="font-semibold text-[var(--accent)]" onClick={() => (setPlaying(false), setFrame(nowIndex))}>
+          <div className="flex items-center justify-between text-[10px] text-faint">
+            <span>{formatTime(frames[0].time)}</span>
+            <button type="button" className="rounded-full bg-[var(--accent)]/15 px-2 py-0.5 font-semibold text-[var(--accent)]" onClick={() => (setPlaying(false), setFrame(nowIndex))}>
               Teď
             </button>
-            <span>
-              <span className="text-violet-400">předpověď</span> +{Math.round((frames[frames.length - 1].time - now) / HOUR)} h
-            </span>
+            <span>+{Math.round((frames[frames.length - 1].time - now) / HOUR)} h</span>
           </div>
         </div>
       </div>
-
+      <div className="mt-2 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-muted">
+        {(['obs', 'nowcast', 'model'] as const)
+          .filter((k) => kinds.includes(k) || (k === 'obs' && kinds.includes('rv')))
+          .map((k) => (
+            <span key={k} className="inline-flex items-center gap-1">
+              <span className="h-2 w-2 rounded-full" style={{ background: KIND_INFO[k].color }} />
+              {k === 'obs' ? 'radar (skutečnost)' : k === 'nowcast' ? 'nowcasting do 1 h' : 'model do 24 h'}
+            </span>
+          ))}
+      </div>
       <Legend />
     </div>
   )
@@ -258,7 +314,7 @@ function Legend() {
         ))}
       </div>
       <div className="flex items-center gap-2 text-[10px] text-muted">
-        <span>mm/h · déšť</span>
+        <span>intenzita srážek v mm/h</span>
         <span className="ml-auto">sníh</span>
         <div className="h-2 w-20 rounded-full" style={{ background: legendGradient(true) }} />
       </div>
@@ -266,21 +322,43 @@ function Legend() {
   )
 }
 
-/** Shrnutí z modelové mřížky: kdy a jak silně bude pršet v okolí (≤ ~25 km) */
-function nearbySummary(grid: PrecipGrid, now: number): string {
-  const cy = Math.floor(grid.lats.length / 2)
-  const cx = Math.floor(grid.lons.length / 2)
-  let first: number | null = null
-  let peak = 0
-  grid.times.forEach((t, k) => {
-    if (t <= now || t > now + FORECAST_HOURS * HOUR) return
-    let m = 0
-    for (let dy = -1; dy <= 1; dy++) for (let dx = -1; dx <= 1; dx++) m = Math.max(m, grid.rate[k][cy + dy]?.[cx + dx] ?? 0)
-    if (m >= 0.1 && first === null) first = t - 15 * MINUTE
-    peak = Math.max(peak, m)
-  })
-  if (first === null) return `V okolí Karviné se v příštích ${FORECAST_HOURS} hodinách srážky nečekají.`
-  return `V okolí Karviné začne podle modelu pršet ${formatMoment(first, now)}, nejvyšší intenzita asi ${num(peak, 1)} mm/h.`
+const intensityLabel = (dbz: number) => {
+  const r = dbzToMmh(dbz)
+  return r < 0.5 ? 'slabě' : r < 4 ? 'mírně' : r < 16 ? 'silně' : 'velmi silně'
+}
+
+/** Shrnutí pro okolí Karviné (do 10 km) z radaru, nowcastingu a modelu */
+function useNearbySummary(frames: Frame[], now: number): string | null {
+  const [text, setText] = useState<string | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    const relevant = frames.filter((f) => f.kind !== 'rv')
+    if (!relevant.length) return
+    Promise.all(relevant.map((f) => loadFrame(f.src).then((d): [Frame, FrameData] => [f, d]).catch(() => null))).then((rows) => {
+      if (cancelled) return
+      const at = rows.filter((r): r is [Frame, FrameData] => !!r).map(([f, d]) => ({ f, dbz: maxDbzNear(d, f.bounds!, LOCATION.latitude, LOCATION.longitude, 10) }))
+      const lastObs = [...at].reverse().find((x) => x.f.kind === 'obs')
+      const future = at.filter((x) => x.f.time > (lastObs?.f.time ?? now))
+      const rainingNow = lastObs && lastObs.dbz != null && lastObs.dbz >= 10
+      const firstRain = future.find((x) => x.dbz != null && x.dbz >= 10)
+      const firstDry = future.find((x) => x.dbz == null || x.dbz < 10)
+      const src = (k: Kind) => (k === 'nowcast' ? 'nowcastingu ČHMÚ' : 'modelu ALADIN')
+      if (rainingNow) {
+        setText(
+          `V okolí Karviné teď ${intensityLabel(lastObs!.dbz!)} prší (radar ČHMÚ). ` +
+            (firstDry ? `Podle ${src(firstDry.f.kind)} by mělo přestat ${formatMoment(firstDry.f.time, now)}.` : 'Podle předpovědi bude pršet i dalších 24 hodin.'),
+        )
+      } else if (firstRain) {
+        setText(`V okolí Karviné teď neprší. Podle ${src(firstRain.f.kind)} začne ${intensityLabel(firstRain.dbz!)} pršet ${formatMoment(firstRain.f.time, now)}.`)
+      } else {
+        setText(`V okolí Karviné teď neprší a podle radaru ani modelu ALADIN se v příštích ${MODEL_HOURS} hodinách srážky nečekají.`)
+      }
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [frames, now])
+  return text
 }
 
 function ModelOutlook() {
@@ -295,7 +373,7 @@ function ModelOutlook() {
   const maxV = Math.max(0.5, ...items.map((x) => x.mm))
   const total = items.reduce((s, x) => s + x.mm, 0)
   return (
-    <Card title="Výhled srážek na 6 hodin" subtitle="Model po 15 minutách pro váš bod">
+    <Card title="Srážky na 6 hodin přímo v Karviné" subtitle="Po 15 minutách (Open-Meteo)">
       <div className="flex h-20 items-end gap-[2px]">
         {items.map((x) => (
           <div
@@ -318,27 +396,25 @@ function ModelOutlook() {
 
 export default function RadarPage() {
   const now = useNow(60_000)
-  const q = useRadar()
-  const g = usePrecipGrid()
-  const lastRadar = q.data?.frames.at(-1)?.time
+  const idx = useRadarIndex()
+  const rv = useRadar()
+  const frames = useMemo(() => buildFrames(idx.data, rv.data, now), [idx.data, rv.data, now])
+  const summary = useNearbySummary(frames, now)
+  const lastObs = [...frames].reverse().find((f) => f.kind === 'obs' || f.kind === 'rv')
+  const loading = (idx.isLoading || rv.isLoading) && !frames.length
   return (
     <div className="space-y-3 pb-4">
-      {q.isError && !q.data && g.isError && !g.data ? (
-        <ErrorCard title="Radar srážek" error={q.error} onRetry={() => (q.refetch(), g.refetch())} />
-      ) : !q.data && !g.data ? (
+      {loading ? (
         <LoadingCard title="Radar srážek" lines={8} />
+      ) : !frames.length ? (
+        <ErrorCard title="Radar srážek" error={idx.error ?? rv.error ?? 'Žádná data'} onRetry={() => (idx.refetch(), rv.refetch())} />
       ) : (
-        <Card
-          title="Radar a předpověď srážek"
-          subtitle={`${lastRadar ? `Radar do ${formatTime(lastRadar)} (${formatAgo(lastRadar, now)})` : 'Radar nedostupný'}${g.data ? `, předpověď na ${FORECAST_HOURS} h` : ''}`}
-        >
-          <RadarMap radar={q.data} grid={g.data} />
-          {g.data && <p className="mt-3 text-sm">{nearbySummary(g.data, now)}</p>}
-          {q.isError && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Radar se nepodařilo načíst – zobrazuji jen předpověď.</p>}
-          {g.isError && <p className="mt-2 text-xs text-amber-700 dark:text-amber-300">Předpověď srážek se nepodařilo načíst – zobrazuji jen radar.</p>}
+        <Card title="Radar a předpověď srážek" subtitle={lastObs ? `Poslední radarový snímek ${formatTime(lastObs.time)} (${formatAgo(lastObs.time, now)})` : 'Radar nedostupný – jen předpověď'}>
+          <RadarMap frames={frames} rv={rv.data} />
+          {summary && <p className="mt-3 rounded-2xl bg-black/5 px-3 py-2 text-sm dark:bg-white/5">{summary}</p>}
           <SourceNote>
-            Plná část osy = skutečný radar (RainViewer, posledních ~2 h, detail do ≈ 1 km). Šrafovaná část = předpověď modelu Open-Meteo pro oblast ±130 km (čárkovaný obdélník),
-            hrubší rozlišení (≈ 20 km). Barvy podle intenzity srážek jako ve Windy; slabé mrholení je modré, sníh bělavý.
+            Skutečnost: radar ČHMÚ (rozlišení 1 km, nový snímek každých 5 min), mimo Česko RainViewer. Do hodiny dopředu nowcasting ČHMÚ – posouvá skutečné
+            srážkové buňky podle jejich pohybu. Dál předpověď modelu ČHMÚ ALADIN (2,3 km), aktualizovaná 4× denně. Modrá tečka = Karviná, oranžová = stanice ČHMÚ.
           </SourceNote>
         </Card>
       )}

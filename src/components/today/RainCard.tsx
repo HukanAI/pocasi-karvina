@@ -100,6 +100,20 @@ export function RainCard() {
 
 function NextRain({ next, now }: { next: { at: number; mm: number; prob: number | null }; now: number }) {
   const soon = next.at - now < 2 * HOUR
+  // Za více než 2 dny je přesný čas jen odhad – stačí den
+  if (next.at - now > 2 * DAY) {
+    return (
+      <div className="mt-3 flex items-center gap-2 rounded-2xl bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
+        <WeatherIcon name="raindrop" size={26} />
+        <div>
+          <div>
+            Další déšť nejdříve <b>{formatMoment(next.at, now).replace(/ v \d{2}:\d{2}$/, '')}</b>
+          </div>
+          {next.prob != null && <div className="text-xs text-muted">pravděpodobnost {num(next.prob, 0)} % · výhled na více dní je nejistý</div>}
+        </div>
+      </div>
+    )
+  }
   return (
     <div className="mt-3 flex items-center gap-2 rounded-2xl bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
       <WeatherIcon name="raindrop" size={26} />

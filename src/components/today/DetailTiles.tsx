@@ -4,7 +4,7 @@ import type { ReactNode } from 'react'
 import { Link } from 'react-router-dom'
 import { indexAtOrBefore } from '../../api/openMeteo.ts'
 import { eaqiBand } from '../../lib/aqi.ts'
-import { beaufort, beaufortLabel, hPa, kmh, num, pct, signed, temp, uvLabel, visibilityLabel, windDir, windDirLong } from '../../lib/format.ts'
+import { beaufort, beaufortLabel, hPa, kmh, num, pct, signed, temp, uvLabel, visibilityLabel, windFrom } from '../../lib/format.ts'
 import { formatTime, HOUR, localDateKey } from '../../lib/time.ts'
 import { useNow } from '../../state/derived.ts'
 import { useAir, useForecast } from '../../state/queries.ts'
@@ -97,7 +97,14 @@ export function DetailTiles() {
 
   return (
     <div className="grid grid-cols-2 gap-3">
-      <Tile title="Vítr" icon="wind" footer={`${windDirLong(c.wind_direction_10m)} (${windDir(c.wind_direction_10m)}) · nárazy ${kmh(c.wind_gusts_10m)} · ${bf}° B – ${beaufortLabel(bf)}`}>
+      <Tile title="Vítr" icon="wind" footer={
+          <>
+            <span className="capitalize">{beaufortLabel(bf)}</span>
+            {bf > 0 ? ` od ${windFrom(c.wind_direction_10m)}` : ''}
+            <br />
+            nárazy až {kmh(c.wind_gusts_10m)}
+          </>
+        }>
         <Compass deg={c.wind_direction_10m} speed={c.wind_speed_10m} />
       </Tile>
 

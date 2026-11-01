@@ -14,7 +14,7 @@ export const WMO: Record<number, WmoEntry> = {
   0: { label: 'Jasno', icon: 'clear-{dn}', sky: 'clear' },
   1: { label: 'Skoro jasno', icon: 'partly-cloudy-{dn}', sky: 'partly' },
   2: { label: 'Polojasno', icon: 'partly-cloudy-{dn}', sky: 'partly' },
-  3: { label: 'Zataženo', icon: 'overcast-{dn}', sky: 'cloudy' },
+  3: { label: 'Zataženo', icon: 'overcast', sky: 'cloudy' },
   45: { label: 'Mlha', icon: 'fog-{dn}', sky: 'fog' },
   48: { label: 'Mlha s námrazou', icon: 'fog', sky: 'fog' },
   51: { label: 'Slabé mrholení', icon: 'drizzle', sky: 'drizzle' },

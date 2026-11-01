@@ -81,5 +81,5 @@ export interface WarningsFile {
 
 /** meta.json – časy poslední úspěšné aktualizace jednotlivých částí */
 export type MetaFile = Partial<
-  Record<'station' | 'stationDaily' | 'stationDailyFull' | 'era5' | 'era5Full' | 'warnings' | 'alerts', string>
+  Record<'station' | 'stationDaily' | 'stationDailyFull' | 'era5' | 'era5Full' | 'warnings' | 'alerts' | 'radar', string>
 >

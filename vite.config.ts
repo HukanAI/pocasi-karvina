@@ -47,6 +47,12 @@ export default defineConfig({
         navigateFallback: `${BASE}index.html`,
         runtimeCaching: [
           {
+            // Radarové snímky z data větve mají v názvu čas → nemění se, stačí cache (vlastní, aby nevytlačily ostatní data)
+            urlPattern: ({ url }) => url.hostname === 'raw.githubusercontent.com' && /\/radar\/(obs|nowcast|model)\//.test(url.pathname),
+            handler: 'CacheFirst',
+            options: { cacheName: 'radar-frames', expiration: { maxEntries: 150, maxAgeSeconds: 60 * 60 * 30 } },
+          },
+          {
             // Předpočítaná data z data větve (měření ČHMÚ, výstrahy, klimatologie).
             // NetworkFirst: vždy nejčerstvější data, cache jen když síť nedopoví (StaleWhileRevalidate by vracel starou verzi)
             urlPattern: ({ url }) => url.hostname === 'raw.githubusercontent.com',

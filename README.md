@@ -9,7 +9,7 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 
 - **Dnes**: aktuální stav (měření ČHMÚ + model), odchylka od normálu, **čas od posledního deště** (živé počítadlo z 10min měření srážkoměru ČHMÚ), hodinová předpověď na 48 h, srážky na 2 h po 15 minutách, vítr, tlak, vlhkost, UV, oblačnost, kvalita ovzduší, Slunce a Měsíc, výstrahy ČHMÚ
 - **Předpověď**: 16 dní s hodinovým detailem, jistota předpovědi (ensemble ECMWF, 51 variant), srovnání 6 modelů
-- **Radar**: animace srážek za poslední 2 hodiny + výhled na 6 hodin
+- **Radar** (ve stylu Windy, jedna časová osa): radar ČHMÚ za poslední 2 h (1 km, po 5 min) → nowcasting ČHMÚ na 1 h → model ČHMÚ ALADIN na 24 h (2,3 km)
 - **Ovzduší**: index EAQI, PM10, PM2,5, NO₂, O₃, SO₂, CO, denní průměry vs. limity, pyl
 - **Historie**: normál 1991–2020, rekordy dne, tento den v minulých letech (od 1877), letošní rok po měsících, kumulativní srážky, charakteristické dny, klimatický trend a „warming stripes“, suchá období, srovnání libovolných dvou let. Zdroj lze přepnout mezi měřením ČHMÚ a reanalýzou ERA5.
 - **Upozornění do telefonu** (přes aplikaci ntfy): mráz, náledí, bouřky, přívalový déšť, vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30
@@ -22,7 +22,8 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 | Měření stanice Karviná (0-203-0-11795) | [ČHMÚ – otevřená data](https://opendata.chmi.cz/meteorology/climate/) |
 | Výstrahy | ČHMÚ přes [MeteoAlarm](https://meteoalarm.org) |
 | Kvalita ovzduší a pyl | Copernicus CAMS přes Open-Meteo |
-| Radar | [RainViewer](https://www.rainviewer.com) |
+| Radar, nowcasting, model ALADIN | [ČHMÚ – otevřená data](https://opendata.chmi.cz/meteorology/weather/) |
+| Radar mimo Česko | [RainViewer](https://www.rainviewer.com) |
 | Mapa | Esri, © přispěvatelé OpenStreetMap |
 
 ## Jak to funguje
@@ -45,6 +46,7 @@ GitHub Action (`.github/workflows/data.yml`) do větve `data`:
 | `era5-daily.json` | denní řada ERA5 od 1940 | denně |
 | `warnings.json` | platné výstrahy pro ORP Karviná | každých 10 min |
 | `alerts-state.json` | odeslaná upozornění (aby nechodila dvakrát) | každých 10 min |
+| `radar/index.json` + `radar/obs`, `nowcast`, `model` | radarové snímky (šedotónové PNG, hodnota = dBZ), viz `src/lib/radarData.ts` | každých 10 min, model 4× denně |
 
 ## Spolehlivé spouštění aktualizací (cron-job.org)
 
@@ -93,6 +95,7 @@ Datové skripty lze spustit i samostatně (`DATA_DIR` určuje výstupní složku
 node scripts/update-station.ts          # měření ČHMÚ
 node scripts/update-climate.ts --full   # celé historické řady
 node scripts/fetch-warnings.ts          # výstrahy
+node scripts/update-radar.ts            # radar, nowcasting a model ALADIN (~125 MB při novém běhu)
 node scripts/check-alerts.ts --dry-run  # vypíše upozornění, nic neodešle
 ```
 
@@ -101,6 +104,10 @@ Ověřené konvence dat ČHMÚ (testováno na skutečných datech):
 - časy jsou v UTC, 10min značka = **konec** intervalu (hodinový úhrn v čase t = součet 10min hodnot t−50 … t)
 - denní srážky dne D = úhrn od 7:00 SEČ dne D do 7:00 dne D+1
 - denní maximum a minimum = období 21:00–21:00 SEČ končící dnem D
+- radar `pseudocappi2km` PNG: EPSG:3857, celý obrázek 11,267–20,770° v. d. × 48,047–52,167° s. š., data jen v 11,267–19,624 × 48,047–51,458;
+  paleta: index 195 = 4–8 dBZ … 181 = ≥ 60 dBZ (po 4 dBZ), 242 = mimo dosah. Umístění ověřeno proti srážkoměru Karviná (korelace 0,76)
+- ALADIN `MAXSIM_REFLECTI` se pro srážky nehodí (při 1–3 mm/h jen ~3 dBZ), proto se používají hodinové přírůstky `SURFRAINFALL` + `SURFSNOWFALL`;
+  Lambertova mřížka ověřena proti lat/lon variantě téhož běhu (korelace 0,96, posun ~1 km)
 - teplotní řada stanice nemá úplná data (≥ 90 % dní) pro roky 1878, 1884–1897, 1939–1949, 1979–1987 a 2008–2011
 
 ## Licence dat
