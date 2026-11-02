@@ -4,9 +4,19 @@ import { useEffect, useMemo, useState } from 'react'
 import { type Forecast, indexAtOrBefore } from '../api/openMeteo.ts'
 import { dayPhase } from '../lib/astro.ts'
 import type { StationNow, StationSra10 } from '../lib/dataTypes.ts'
-import { expectedRainEnd, type ForecastPrecip, mergeSamples, nextRain, nextRainChance, type PrecipSample, rainState } from '../lib/rain.ts'
+import {
+  expectedRainEnd,
+  type ForecastPrecip,
+  mergeSamples,
+  nextRain,
+  nextRainChance,
+  nowcastQuarters,
+  nowcastSummary,
+  type PrecipSample,
+  rainState,
+} from '../lib/rain.ts'
 import { HOUR, MINUTE } from '../lib/time.ts'
-import { wmoSky } from '../lib/wmo.ts'
+import { effectiveCode, isPrecipCode, measuredPrecipCode, wmoSky } from '../lib/wmo.ts'
 import { useForecast, useStationNow, useStationSra } from './queries.ts'
 import { useSettings } from './useSettings.ts'
 
@@ -92,18 +102,27 @@ export function useRain(now: number) {
     const state = rainState(merged, now, settings.rainMinTotal)
     const future = model.filter((s) => s.t > now)
     const lastStationT = station.length ? station[station.length - 1].t : null
+    const f = forecast.data
+    // Příští 2 hodiny: stejný výpočet jako karta „Srážky v příštích 2 hodinách“
+    const near = f ? nowcastSummary(nowcastQuarters(f.minutely15.time, f.minutely15.precipitation, now)) : null
     return {
       state,
+      near,
       next: nextRain(future, now),
-      // Šance na srážky stejně jako v hodinové předpovědi (pravděpodobnost ≥ 10 % nebo předpovězené množství)
-      chance: forecast.data
+      // Šance na srážky stejně jako v hodinové předpovědi (pravděpodobnost ≥ 10 % nebo předpovězené množství);
+      // hodiny pokryté výhledem na 2 h rozhoduje podrobnější předpověď po 15 minutách
+      chance: f
         ? nextRainChance(
-            forecast.data.hourly.time.map((t, i) => ({ t, prob: forecast.data!.hourly.precipitation_probability[i], mm: forecast.data!.hourly.precipitation[i] })),
+            f.hourly.time.map((t, i) => ({ t, prob: f.hourly.precipitation_probability[i], mm: f.hourly.precipitation[i] })),
             now,
+            undefined,
+            near?.until ?? now,
           )
         : null,
       expectedEnd: state.kind === 'raining' ? expectedRainEnd(future, now) : null,
       lastStationT,
+      // Bez předpovědi nelze říct, kdy bude pršet (nesmí se to plést s „déšť se nečeká“)
+      forecastReady: !!f,
       hasStation: station.length > 0,
       isLoading: forecast.isLoading || sra.isLoading,
       minTotal: settings.rainMinTotal,
@@ -111,16 +130,49 @@ export function useRain(now: number) {
   }, [forecast.data, forecast.isLoading, sra.data, sra.isLoading, stNow.data, now, settings.rainMinTotal])
 }
 
-/** Podklady pro pozadí: druh oblohy, fáze dne, intenzita srážek */
-export function useSky(now: number) {
+/**
+ * Aktuální stav počasí pro nadpis i pozadí. Kód z modelu se sladí se srážkami:
+ * „slabý déšť“ při 0 mm → stav oblohy; když podle karty „Bez deště“ právě prší (měření ČHMÚ
+ * nebo 15min data modelu), ale kód srážky nemá → slabý déšť / sněžení.
+ */
+export function useCurrentWeather(now: number) {
   const forecast = useForecast()
+  const rain = useRain(now)
+  const st = useStationNow()
   return useMemo(() => {
     const c = forecast.data?.current
-    return {
-      sky: wmoSky(c?.weather_code ?? 2),
-      phase: dayPhase(now, c ? c.is_day === 1 : null),
-      // current.precipitation je úhrn za 15 min → mm/h
-      intensity: (c?.precipitation ?? 0) * 4,
+    if (!c) return null
+    let code = effectiveCode(c.weather_code, c.precipitation, c.cloud_cover)
+    const raining = rain.state.kind === 'raining'
+    // Jen obloha nebo mlha; mrznoucí srážky a bouřky zůstávají
+    if (raining && (code == null || code <= 3 || code === 45 || code === 48)) {
+      code = measuredPrecipCode(isStationFresh(st.data, now) ? st.data!.last!.T : c.temperature_2m)
     }
-  }, [forecast.data, now])
+    return {
+      code,
+      isDay: c.is_day === 1,
+      // current.precipitation je úhrn za 15 min → mm/h
+      intensity: isPrecipCode(code) || raining ? Math.max((c.precipitation ?? 0) * 4, raining ? 0.5 : 0) : 0,
+    }
+  }, [forecast.data, rain.state.kind, st.data, now])
+}
+
+/** Teplota „teď“: měření ČHMÚ, pokud je čerstvé, jinak model – stejná v nadpisu i v hodinové předpovědi */
+export function useNowTemp(now: number): number | null {
+  const f = useForecast()
+  const st = useStationNow()
+  return isStationFresh(st.data, now) ? st.data!.last!.T! : (f.data?.current.temperature_2m ?? null)
+}
+
+/** Podklady pro pozadí: druh oblohy, fáze dne, intenzita srážek */
+export function useSky(now: number) {
+  const cw = useCurrentWeather(now)
+  return useMemo(
+    () => ({
+      sky: wmoSky(cw?.code ?? 2),
+      phase: dayPhase(now, cw ? cw.isDay : null),
+      intensity: cw?.intensity ?? 0,
+    }),
+    [cw, now],
+  )
 }

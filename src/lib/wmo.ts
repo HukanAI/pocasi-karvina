@@ -64,3 +64,43 @@ export function wmoSky(code: number | null | undefined): SkyKind {
 
 export const isThunder = (code: number | null | undefined) => code != null && code >= 95 && code <= 99
 export const isFreezingPrecip = (code: number | null | undefined) => code === 56 || code === 57 || code === 66 || code === 67
+
+/** Kód se srážkami (mrholení, déšť, sníh, přeháňky); mrznoucí srážky a bouřky sem nepatří */
+export const isPrecipCode = (code: number | null | undefined) =>
+  code != null && ((code >= 51 && code <= 55) || (code >= 61 && code <= 65) || (code >= 71 && code <= 77) || (code >= 80 && code <= 86))
+
+/** Stav oblohy podle oblačnosti v % (bez údaje = zataženo) */
+export function cloudCode(cloudCover: number | null | undefined): number {
+  if (cloudCover == null || cloudCover >= 80) return 3
+  return cloudCover >= 40 ? 2 : cloudCover >= 15 ? 1 : 0
+}
+
+/**
+ * Kód počasí, který odpovídá zobrazeným srážkám. Open-Meteo vrací kód „slabý déšť“ i pro hodiny,
+ * kde stejná předpověď počítá 0 mm (kód vychází z jiné veličiny než úhrn). Aby ikona a popis
+ * neříkaly „prší“, zatímco srážky ukazují 0 mm, nahradí se takový kód stavem oblohy.
+ */
+export function effectiveCode(code: number | null | undefined, precipMm: number | null | undefined, cloudCover: number | null | undefined): number | null {
+  if (!isPrecipCode(code)) return code ?? null
+  return (precipMm ?? 0) > 0 ? code! : cloudCode(cloudCover)
+}
+
+/** Srážky naměřené, ale model je nehlásí: slabý déšť, při teplotě kolem nuly a níž sněžení */
+export const measuredPrecipCode = (tempC: number | null | undefined) => (tempC != null && tempC <= 0.5 ? 71 : 61)
+
+interface DayInput {
+  hourly: { time: number[]; cloud_cover?: (number | null)[] }
+  daily: { time: number[]; weather_code: (number | null)[]; precipitation_sum: (number | null)[] }
+}
+
+/** Stav pro den: kód srážek jen tehdy, když model na ten den nějaké srážky počítá, jinak průměrná oblačnost dne */
+export function dayCode(f: DayInput, i: number): number | null {
+  const code = f.daily.weather_code[i]
+  if (!isPrecipCode(code) || (f.daily.precipitation_sum[i] ?? 0) > 0) return code ?? null
+  const start = f.daily.time[i]
+  const end = f.daily.time[i + 1] ?? start + 24 * 3_600_000
+  const cc = f.hourly.cloud_cover
+  const values: number[] = []
+  if (cc) f.hourly.time.forEach((t, k) => t > start && t <= end && cc[k] != null && values.push(cc[k]!))
+  return cloudCode(values.length ? values.reduce((a, b) => a + b, 0) / values.length : null)
+}

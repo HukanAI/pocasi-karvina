@@ -11,7 +11,7 @@ import { MODELS } from '../config.ts'
 import { kmh, mm, num, tempShort, uvLabel, windDir } from '../lib/format.ts'
 import { mean } from '../lib/stats.ts'
 import { DAY, formatDayMonth, formatDuration, formatTime, formatWeekdayLong, formatWeekdayShort, localDateKey } from '../lib/time.ts'
-import { wmoIcon, wmoLabel } from '../lib/wmo.ts'
+import { dayCode, wmoIcon, wmoLabel } from '../lib/wmo.ts'
 import { useNow } from '../state/derived.ts'
 import { useEnsemble, useForecast, useModels } from '../state/queries.ts'
 
@@ -61,7 +61,7 @@ function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number 
         formatter: (ps: unknown) => {
           const k = (ps as { dataIndex: number }[])[0].dataIndex
           const { t, i } = days[k]
-          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(d.weather_code[i])}<br/>max ${tempShort(d.temperature_2m_max[i])}, min ${tempShort(d.temperature_2m_min[i])}<br/>srážky ${mm(d.precipitation_sum[i])} (${num(d.precipitation_probability_max[i], 0)} %)`
+          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(dayCode(f, i))}<br/>max ${tempShort(d.temperature_2m_max[i])}, min ${tempShort(d.temperature_2m_min[i])}<br/>srážky ${mm(d.precipitation_sum[i])} (${num(d.precipitation_probability_max[i], 0)} %)`
         },
       },
       xAxis: { type: 'category', data: days.map(({ t }, k) => (k < 2 ? dayName(t, k) : `${formatWeekdayShort(t)}\n${formatDayMonth(t)}`)), ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 9, interval: 1 } },
@@ -84,7 +84,7 @@ function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number 
         { name: 'Min', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }) => d.temperature_2m_min[i]), lineStyle: { color: c.cold, width: 2.5 }, itemStyle: { color: c.cold } },
       ],
     }),
-    [c, d, days],
+    [c, d, days, f],
   )
   return <EChart option={option} height={190} />
 }
@@ -124,7 +124,7 @@ function DailyList({ f, updatedAt, error }: { f: Forecast; updatedAt: number; er
                     <div className="text-sm font-semibold capitalize">{dayName(t, k)}</div>
                     <div className="text-[11px] text-faint">{formatDayMonth(t)}</div>
                   </div>
-                  <WeatherIcon name={wmoIcon(d.weather_code[i], true)} size={36} alt={wmoLabel(d.weather_code[i])} />
+                  <WeatherIcon name={wmoIcon(dayCode(f, i), true)} size={36} alt={wmoLabel(dayCode(f, i))} />
                   <div className="tabular min-w-0 flex-1 text-xs leading-tight">
                     {rainy ? (
                       <>
@@ -187,7 +187,7 @@ function DayDetail({ f, dayIndex }: { f: Forecast; dayIndex: number }) {
     [c, idx, h],
   )
   const rows: [string, string][] = [
-    ['Stav', wmoLabel(d.weather_code[dayIndex])],
+    ['Stav', wmoLabel(dayCode(f, dayIndex))],
     ['Pocitová teplota', `${tempShort(d.apparent_temperature_min[dayIndex])} až ${tempShort(d.apparent_temperature_max[dayIndex])}`],
     ['Srážky', `${mm(d.precipitation_sum[dayIndex])} · ${num(d.precipitation_hours[dayIndex], 0)} h · ${num(d.precipitation_probability_max[dayIndex], 0)} %`],
     ...(d.snowfall_sum[dayIndex] ? [['Nový sníh', `${num(d.snowfall_sum[dayIndex], 1)} cm`] as [string, string]] : []),

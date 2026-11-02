@@ -182,7 +182,7 @@ export function lastWetDay(daily: { date: string; mm: number | null }[], minTota
 export const CHANCE_MIN_PROB = 10
 
 export interface HourChance {
-  /** Konec hodinového intervalu (ms) – stejný čas, pod kterým hodinu ukazuje hodinová předpověď */
+  /** Konec hodinového intervalu (ms); Open-Meteo udává srážky i pravděpodobnost za předchozí hodinu */
   t: number
   prob: number | null
   mm: number | null
@@ -191,11 +191,59 @@ export interface HourChance {
 /**
  * Nejbližší hodina, kdy může pršet: pravděpodobnost ≥ 10 % NEBO model počítá s ≥ 0,1 mm.
  * Odpovídá tomu, co uživatel vidí v hodinové předpovědi (procenta u kapky).
+ * Hodiny, které celé spadají do výhledu na 2 hodiny (končí nejpozději v `coveredUntil`), se přeskočí –
+ * pro ně platí podrobnější předpověď po 15 minutách.
  */
-export function nextRainChance(hours: HourChance[], now: number, minProb = CHANCE_MIN_PROB): HourChance | null {
+export function nextRainChance(hours: HourChance[], now: number, minProb = CHANCE_MIN_PROB, coveredUntil = now): HourChance | null {
   for (const h of [...hours].sort((a, b) => a.t - b.t)) {
-    if (h.t <= now) continue
+    if (h.t <= Math.max(now, coveredUntil)) continue
     if ((h.prob ?? 0) >= minProb || (h.mm ?? 0) >= WET_MIN_MM - EPS) return h
   }
   return null
+}
+
+// ------------------------------------------------------------------ Výhled na 2 hodiny po 15 minutách
+
+export const NOWCAST_HORIZON = 2 * 60 * MINUTE
+const Q = 15 * MINUTE
+
+export interface Quarter {
+  /** Začátek a konec 15min intervalu (ms) */
+  start: number
+  end: number
+  mm: number
+}
+
+/** Čtvrthodiny od té právě probíhající na 2 hodiny dopředu (Open-Meteo: čas = konec intervalu) */
+export function nowcastQuarters(time: number[], precip: (number | null)[], now: number): Quarter[] {
+  const out: Quarter[] = []
+  time.forEach((t, i) => {
+    if (t > now && t - Q < now + NOWCAST_HORIZON && precip[i] != null) out.push({ start: t - Q, end: t, mm: precip[i]! })
+  })
+  return out.sort((a, b) => a.start - b.start)
+}
+
+export type NowcastSummary =
+  | { kind: 'dry'; until: number }
+  | { kind: 'starts'; at: number; total: number; until: number }
+  | { kind: 'ongoing'; dryAt: number | null; total: number; until: number }
+
+/** Co říká výhled na 2 hodiny – jedna funkce pro kartu „Srážky v příštích 2 hodinách“ i „Bez deště“ */
+export function nowcastSummary(q: Quarter[]): NowcastSummary | null {
+  if (!q.length) return null
+  const until = q[q.length - 1].end
+  const wet = (x: Quarter) => x.mm >= WET_MIN_MM - EPS
+  const total = q.reduce((a, x) => a + x.mm, 0)
+  if (wet(q[0])) return { kind: 'ongoing', dryAt: q.find((x) => !wet(x))?.start ?? null, total, until }
+  const first = q.find(wet)
+  return first ? { kind: 'starts', at: first.start, total, until } : { kind: 'dry', until }
+}
+
+/** Slovní intenzita srážek podle mm/h */
+export function intensityWord(mmPerHour: number): string {
+  if (mmPerHour < 0.05) return 'bez srážek'
+  if (mmPerHour < 1) return 'slabé srážky'
+  if (mmPerHour < 4) return 'mírné srážky'
+  if (mmPerHour < 10) return 'silné srážky'
+  return 'velmi silné srážky'
 }

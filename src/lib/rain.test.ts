@@ -4,7 +4,10 @@ import {
   expectedRainEnd,
   findGaps,
   lastWetDay,
+  intensityWord,
   nextRainChance,
+  nowcastQuarters,
+  nowcastSummary,
   mergeSamples,
   nextRain,
   rainState,
@@ -196,5 +199,41 @@ describe('nextRainChance', () => {
   })
   it('chybějící hodnoty (null) se berou jako 0', () => {
     expect(nextRainChance([{ t: now + H, prob: null, mm: null }], now)).toBeNull()
+  })
+})
+
+describe('výhled na 2 hodiny', () => {
+  const now = T0 + 33 * MINUTE // 00:33
+  // 15min řada Open-Meteo: čas = konec intervalu
+  const times = Array.from({ length: 16 }, (_, i) => T0 + i * M15)
+  it('bere probíhající čtvrthodinu a 2 hodiny dopředu', () => {
+    const q = nowcastQuarters(times, times.map(() => 0), now)
+    expect(q[0].start).toBe(T0 + 30 * MINUTE) // 00:30–00:45 obsahuje 00:33
+    expect(q.at(-1)!.start).toBe(T0 + 150 * MINUTE) // 02:30–02:45 začíná před 02:33
+    expect(q).toHaveLength(9)
+  })
+  it('skutečný případ 2. 11.: první 0,1 mm v intervalu 20:00–20:15 → „začne kolem 20:00“', () => {
+    const mm = times.map((t) => (t === T0 + 2 * 60 * MINUTE + M15 ? 0.1 : 0))
+    const s = nowcastSummary(nowcastQuarters(times, mm, now))
+    expect(s).toMatchObject({ kind: 'starts', at: T0 + 2 * 60 * MINUTE })
+  })
+  it('sucho a probíhající srážky', () => {
+    expect(nowcastSummary(nowcastQuarters(times, times.map(() => 0), now))?.kind).toBe('dry')
+    const wetNow = times.map((t) => (t <= T0 + 60 * MINUTE ? 0.3 : 0))
+    expect(nowcastSummary(nowcastQuarters(times, wetNow, now))).toMatchObject({ kind: 'ongoing', dryAt: T0 + 60 * MINUTE })
+    expect(nowcastSummary([])).toBeNull()
+  })
+  it('hodiny pokryté výhledem na 2 h se v šanci přeskočí', () => {
+    const H = 60 * MINUTE
+    const hours = [
+      { t: T0 + H, prob: 40, mm: 0 },
+      { t: T0 + 2 * H, prob: 35, mm: 0 },
+      { t: T0 + 4 * H, prob: 18, mm: 0 },
+    ]
+    expect(nextRainChance(hours, now)?.t).toBe(T0 + H)
+    expect(nextRainChance(hours, now, 10, T0 + 2 * H + 45 * MINUTE)?.t).toBe(T0 + 4 * H)
+  })
+  it('slovní intenzita', () => {
+    expect([0, 0.4, 2, 6, 20].map(intensityWord)).toEqual(['bez srážek', 'slabé srážky', 'mírné srážky', 'silné srážky', 'velmi silné srážky'])
   })
 })

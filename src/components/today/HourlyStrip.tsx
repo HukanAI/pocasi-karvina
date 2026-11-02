@@ -2,10 +2,12 @@
 
 import { indexAtOrBefore } from '../../api/openMeteo.ts'
 import { num, tempShort } from '../../lib/format.ts'
-import { formatTime, formatWeekdayShort, HOUR, localDateKey, MINUTE } from '../../lib/time.ts'
-import { wmoIcon, wmoLabel } from '../../lib/wmo.ts'
-import { useNow } from '../../state/derived.ts'
+import { nowcastQuarters, nowcastSummary } from '../../lib/rain.ts'
+import { formatTime, formatWeekdayShort, localDateKey } from '../../lib/time.ts'
+import { effectiveCode, wmoIcon, wmoLabel } from '../../lib/wmo.ts'
+import { useCurrentWeather, useNow, useNowTemp } from '../../state/derived.ts'
 import { useForecast } from '../../state/queries.ts'
+import { PrecipBars } from '../PrecipBars.tsx'
 import { Card, ErrorCard, LoadingCard, StaleNote } from '../ui.tsx'
 import { WeatherIcon } from '../WeatherIcon.tsx'
 
@@ -20,14 +22,21 @@ function Drop({ className = '' }: { className?: string }) {
 export function HourlyStrip() {
   const now = useNow(60_000)
   const f = useForecast()
+  const cw = useCurrentWeather(now)
+  const nowTemp = useNowTemp(now)
   if (f.isError && !f.data) return <ErrorCard title="Hodinová předpověď" error={f.error} onRetry={() => f.refetch()} />
   if (!f.data) return <LoadingCard title="Hodinová předpověď" />
   const h = f.data.hourly
   const start = Math.max(0, indexAtOrBefore(h.time, now))
-  const idx = Array.from({ length: 48 }, (_, i) => start + i).filter((i) => i < h.time.length)
-  const prob = (i: number) => h.precipitation_probability[i]
+  // Sloupec „19“ = hodina 19:00–20:00. Teplota platí v 19:00, srážky a pravděpodobnost Open-Meteo udává
+  // za předchozí hodinu, takže pro tuto hodinu se berou z hodnoty v 20:00 (index + 1).
+  const idx = Array.from({ length: 48 }, (_, i) => start + i).filter((i) => i + 1 < h.time.length)
+  const prob = (i: number) => h.precipitation_probability[i + 1]
+  // Ikona odpovídá srážkám té hodiny (kód „déšť“ při 0 mm se nahradí oblačností)
+  // Sloupec „Teď“ ukazuje totéž co nadpis (měřená teplota, aktuální stav)
+  const code = (i: number) => (i === start && cw ? cw.code : effectiveCode(h.weather_code[i + 1], h.precipitation[i + 1], h.cloud_cover[i + 1]))
   // Řádek srážek jen tehdy, když v příštích 48 h nějaké hrozí
-  const showRain = idx.some((i) => (prob(i) ?? 0) >= 10 || (h.precipitation[i] ?? 0) >= 0.1)
+  const showRain = idx.some((i) => (prob(i) ?? 0) >= 10 || (h.precipitation[i + 1] ?? 0) >= 0.1)
   return (
     <Card title="Hodinová předpověď" pad={false} className="pb-3">
       <div className="no-scrollbar flex gap-1 overflow-x-auto px-3">
@@ -38,8 +47,8 @@ export function HourlyStrip() {
           return (
             <div key={t} className={`flex min-w-[54px] flex-col items-center gap-0.5 rounded-2xl px-1 py-2 ${k === 0 ? 'bg-white/35 dark:bg-white/10' : ''}`}>
               <div className={`text-[11px] font-semibold ${k === 0 || newDay ? '' : 'text-muted'}`}>{k === 0 ? 'Teď' : newDay ? formatWeekdayShort(t) : formatTime(t).slice(0, 2)}</div>
-              <WeatherIcon name={wmoIcon(h.weather_code[i], h.is_day[i] === 1)} size={38} alt={wmoLabel(h.weather_code[i])} />
-              <div className="tabular text-base font-semibold">{tempShort(h.temperature_2m[i])}</div>
+              <WeatherIcon name={wmoIcon(code(i), k === 0 && cw ? cw.isDay : h.is_day[i] === 1)} size={38} alt={wmoLabel(code(i))} />
+              <div className="tabular text-base font-semibold">{tempShort(k === 0 ? nowTemp : h.temperature_2m[i])}</div>
               {showRain && (
                 <div className="tabular flex h-4 items-center gap-0.5 text-[10px] font-medium text-[var(--rain)]">
                   {p != null && p >= 10 && (
@@ -71,14 +80,10 @@ export function Nowcast() {
   const now = useNow(60_000)
   const f = useForecast()
   if (!f.data) return null
-  const m = f.data.minutely15
-  const items = m.time
-    .map((t, i) => ({ t, mm: m.precipitation[i] ?? 0 }))
-    .filter((x) => x.t > now - 15 * MINUTE && x.t <= now + 2 * HOUR + 15 * MINUTE)
-    .slice(0, 9)
-  if (!items.length) return null
-  const wet = items.filter((x) => x.mm >= 0.1)
-  if (!wet.length) {
+  const q = nowcastQuarters(f.data.minutely15.time, f.data.minutely15.precipitation, now)
+  const s = nowcastSummary(q)
+  if (!s) return null
+  if (s.kind === 'dry') {
     return (
       <section className="glass flex items-center gap-3 rounded-3xl px-4 py-3">
         <WeatherIcon name="umbrella" size={30} />
@@ -89,32 +94,18 @@ export function Nowcast() {
       </section>
     )
   }
-  const max = Math.max(0.5, ...items.map((x) => x.mm))
-  let summary: string
-  if (items[0].mm >= 0.1) {
-    const dryAt = items.find((x) => x.mm < 0.1)
-    summary = dryAt ? `Srážky by měly ustat kolem ${formatTime(dryAt.t - 15 * MINUTE)}.` : 'Srážky budou pokračovat i v příštích 2 hodinách.'
-  } else summary = `Srážky mohou začít kolem ${formatTime(wet[0].t - 15 * MINUTE)}.`
+  const summary =
+    s.kind === 'ongoing'
+      ? s.dryAt
+        ? `Srážky by měly ustat kolem ${formatTime(s.dryAt)}.`
+        : 'Srážky budou pokračovat i v příštích 2 hodinách.'
+      : `Srážky mohou začít kolem ${formatTime(s.at)}.`
   return (
     <Card title="Srážky v příštích 2 hodinách">
-      <p className="mb-3 text-sm font-medium">{summary}</p>
-      <div className="flex h-16 items-end gap-1">
-        {items.map((x) => (
-          <div key={x.t} className="flex h-full flex-1 flex-col items-center justify-end">
-            <div
-              className="w-full rounded-t-md bg-[var(--rain)]"
-              style={{ height: `${Math.max(x.mm >= 0.1 ? 8 : 2, (x.mm / max) * 100)}%`, opacity: x.mm >= 0.1 ? 0.9 : 0.25 }}
-              title={`${formatTime(x.t - 15 * MINUTE)}–${formatTime(x.t)}: ${num(x.mm, 1)} mm`}
-            />
-          </div>
-        ))}
-      </div>
-      <div className="mt-1 flex justify-between text-[10px] text-faint">
-        <span>{formatTime(items[0].t - 15 * MINUTE)}</span>
-        <span>{formatTime(items[Math.floor(items.length / 2)].t)}</span>
-        <span>{formatTime(items[items.length - 1].t)}</span>
-      </div>
-      <p className="mt-2 text-[11px] text-faint">Po 15 minutách, model ICON-D2. Výška sloupce = množství srážek.</p>
+      <p className="text-sm font-medium">{summary}</p>
+      <p className="mb-2 text-xs text-muted">Celkem asi {num(s.total, 1)} mm za 2 hodiny</p>
+      <PrecipBars bars={q} values />
+      <p className="mt-2 text-[11px] text-faint">Po 15 minutách, model ICON-D2. Výška sloupce = množství srážek za 15 minut.</p>
     </Card>
   )
 }

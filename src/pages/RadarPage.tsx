@@ -9,6 +9,7 @@ import L from 'leaflet'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { RadarData } from '../api/dataBranch.ts'
 import { colorize, type FrameData, leafletBounds, loadFrame, maxDbzNear } from '../components/radar/frames.ts'
+import { type PrecipBar, PrecipBars } from '../components/PrecipBars.tsx'
 import { Card, ErrorCard, LoadingCard, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, LOCATION } from '../config.ts'
 import { num } from '../lib/format.ts'
@@ -458,31 +459,18 @@ function useNearbySummary(frames: Frame[], now: number): string | null {
 function ModelOutlook() {
   const now = useNow(60_000)
   const f = useForecast()
-  const items = useMemo(() => {
+  const bars = useMemo(() => {
     if (!f.data) return []
     const m = f.data.minutely15
-    return m.time.map((t, i) => ({ t, mm: m.precipitation[i] ?? 0 })).filter((x) => x.t > now && x.t <= now + 6 * HOUR)
+    return m.time
+      .map((t, i) => ({ start: t - 15 * MINUTE, end: t, mm: m.precipitation[i] }))
+      .filter((x): x is PrecipBar => x.mm != null && x.end > now && x.start < now + 6 * HOUR)
   }, [f.data, now])
-  if (!items.length) return null
-  const maxV = Math.max(0.5, ...items.map((x) => x.mm))
-  const total = items.reduce((s, x) => s + x.mm, 0)
+  if (!bars.length) return null
+  const total = bars.reduce((s, x) => s + x.mm, 0)
   return (
-    <Card title="Srážky na 6 hodin přímo v Karviné" subtitle="Po 15 minutách (Open-Meteo)">
-      <div className="flex h-20 items-end gap-[2px]">
-        {items.map((x) => (
-          <div
-            key={x.t}
-            className="flex-1 rounded-t-sm bg-[var(--rain)]"
-            style={{ height: `${Math.max(x.mm >= 0.1 ? 6 : 1, (x.mm / maxV) * 100)}%`, opacity: x.mm >= 0.1 ? 0.9 : 0.2 }}
-            title={`${formatTime(x.t - 15 * MINUTE)}–${formatTime(x.t)}: ${num(x.mm, 1)} mm`}
-          />
-        ))}
-      </div>
-      <div className="mt-1 flex justify-between text-[10px] text-faint">
-        <span>{formatTime(items[0].t - 15 * MINUTE)}</span>
-        <span>+3 h</span>
-        <span>{formatTime(items[items.length - 1].t)}</span>
-      </div>
+    <Card title="Srážky na 6 hodin přímo v Karviné" subtitle="Po 15 minutách (model ICON-D2, stejný jako na záložce Dnes)">
+      <PrecipBars bars={bars} height={80} />
       <p className="mt-2 text-sm">{total < 0.1 ? 'V příštích 6 hodinách bez srážek.' : `Celkem asi ${num(total, 1)} mm za 6 hodin.`}</p>
     </Card>
   )

@@ -5,7 +5,8 @@ import { dayNormal } from '../../lib/climate.ts'
 import { num, signed, tempShort } from '../../lib/format.ts'
 import { formatAgo, formatTime, localDateKey, localParts } from '../../lib/time.ts'
 import { wmoIcon, wmoLabel } from '../../lib/wmo.ts'
-import { isStationFresh, useNow } from '../../state/derived.ts'
+import { todayRange } from '../../lib/todayRange.ts'
+import { isStationFresh, useCurrentWeather, useNow, useNowTemp } from '../../state/derived.ts'
 import { useForecast, useStationDaily, useStationNow } from '../../state/queries.ts'
 import { Pill, Skeleton } from '../ui.tsx'
 import { WeatherIcon } from '../WeatherIcon.tsx'
@@ -15,8 +16,10 @@ export function Hero() {
   const f = useForecast()
   const st = useStationNow()
   const daily = useStationDaily()
+  const cw = useCurrentWeather(now)
+  const nowTemp = useNowTemp(now)
 
-  if (!f.data) {
+  if (!f.data || !cw) {
     return (
       <div className="flex flex-col items-center py-6">
         <Skeleton className="h-24 w-40" />
@@ -26,11 +29,16 @@ export function Hero() {
   }
   const c = f.data.current
   const fresh = isStationFresh(st.data, now)
-  const temp = fresh ? st.data!.last!.T! : c.temperature_2m
+  const temp = nowTemp
   const todayKey = localDateKey(now)
   const di = f.data.daily.time.findIndex((t) => localDateKey(t + 12 * 3_600_000) === todayKey)
-  const tmax = di >= 0 ? f.data.daily.temperature_2m_max[di] : null
-  const tmin = di >= 0 ? f.data.daily.temperature_2m_min[di] : null
+  const measured = fresh && st.data!.today?.date === todayKey ? st.data!.today : null
+  const { tmax, tmin } = todayRange(
+    f.data.hourly,
+    measured,
+    { tmax: di >= 0 ? f.data.daily.temperature_2m_max[di] : null, tmin: di >= 0 ? f.data.daily.temperature_2m_min[di] : null },
+    now,
+  )
   const tmean = di >= 0 ? f.data.daily.temperature_2m_mean[di] : null
 
   // Odchylka dnešního průměru (model) od normálu 1991–2020 (stanice ČHMÚ)
@@ -45,7 +53,7 @@ export function Hero() {
 
   return (
     <div className="flex flex-col items-center pt-2 pb-4 text-center">
-      <WeatherIcon name={wmoIcon(c.weather_code, c.is_day === 1)} size={92} className="-mb-2 drop-shadow" alt={wmoLabel(c.weather_code)} />
+      <WeatherIcon name={wmoIcon(cw.code, cw.isDay)} size={92} className="-mb-2 drop-shadow" alt={wmoLabel(cw.code)} />
       <div className="tabular flex items-start text-[88px] leading-none font-extralight tracking-tighter">
         {num(temp, 0)}
         <span className="mt-3 text-4xl font-light">°</span>
@@ -55,7 +63,7 @@ export function Hero() {
           </span>
         )}
       </div>
-      <p className="mt-1 text-xl font-medium">{wmoLabel(c.weather_code)}</p>
+      <p className="mt-1 text-xl font-medium">{wmoLabel(cw.code)}</p>
       <p className="mt-0.5 text-sm text-muted">
         Pocitově {tempShort(c.apparent_temperature)} · max {tempShort(tmax)} · min {tempShort(tmin)}
       </p>

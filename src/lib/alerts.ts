@@ -5,12 +5,12 @@ import type { WarningItem } from './dataTypes.ts'
 import { kmh, num, temp } from './format.ts'
 import { mean } from './stats.ts'
 import { addDays, DAY, formatDayMonth, formatMoment, formatTime, formatWeekdayLong, HOUR, localDateKey, localMidnight, localParts } from './time.ts'
-import { isFreezingPrecip, isThunder, wmoLabel } from './wmo.ts'
+import { dayCode, isFreezingPrecip, isThunder, wmoLabel } from './wmo.ts'
 
 type Arr = (number | null)[]
 
 export interface AlertForecast {
-  hourly: { time: number[]; temperature_2m: Arr; precipitation: Arr; rain: Arr; weather_code: Arr; wind_gusts_10m: Arr }
+  hourly: { time: number[]; temperature_2m: Arr; precipitation: Arr; rain: Arr; weather_code: Arr; wind_gusts_10m: Arr; cloud_cover?: Arr }
   daily: {
     time: number[]
     temperature_2m_max: Arr
@@ -218,7 +218,7 @@ export function morningSummary(input: AlertInput, extra: { stationNightMin?: num
   const i = f.daily.time.findIndex((t) => localDateKey(t) === today)
   if (i < 0) return null
   const lines = [
-    `${wmoLabel(f.daily.weather_code[i])}, ${temp(f.daily.temperature_2m_min[i], 0)} až ${temp(f.daily.temperature_2m_max[i], 0)}.`,
+    `${wmoLabel(dayCode(f, i))}, ${temp(f.daily.temperature_2m_min[i], 0)} až ${temp(f.daily.temperature_2m_max[i], 0)}.`,
     `Srážky ${num(f.daily.precipitation_sum[i], 1)} mm (pravděpodobnost ${num(f.daily.precipitation_probability_max[i], 0)} %), nárazy větru až ${kmh(f.daily.wind_gusts_10m_max[i])}.`,
   ]
   if (extra.stationNightMin != null) lines.push(`V noci naměřeno minimum ${temp(extra.stationNightMin)} (ČHMÚ Karviná).`)
