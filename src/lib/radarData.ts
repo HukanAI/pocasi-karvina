@@ -86,3 +86,31 @@ export interface RadarIndex {
   /** Model ČHMÚ ALADIN 2,3 km – intenzita srážek po hodinách (převedená na dBZ) */
   model: { run: number; bounds: GeoBounds; frames: RadarFrameRef[] } | null
 }
+
+/** Dekódovaný snímek ve společném formátu (prohlížeč i skripty v Actions) */
+export interface FrameData {
+  width: number
+  height: number
+  /** Hodnoty pixelů (0 = nic, 1 = mimo dosah, ≥ 4 = dBZ + sníh) */
+  values: Uint8Array
+}
+
+/** Nejvyšší dBZ v okruhu radiusKm kolem bodu (null = nic / mimo snímek) */
+export function maxDbzNear(f: FrameData, b: GeoBounds, lat: number, lon: number, radiusKm: number): number | null {
+  const x = ((lon - b.west) / (b.east - b.west)) * f.width
+  const y = ((mercY(b.north) - mercY(lat)) / (mercY(b.north) - mercY(b.south))) * f.height
+  const kmPerPx = (((b.east - b.west) * 111.32 * Math.cos((lat * Math.PI) / 180)) / f.width)
+  const r = Math.max(1, Math.round(radiusKm / kmPerPx))
+  let best: number | null = null
+  for (let dy = -r; dy <= r; dy++) {
+    for (let dx = -r; dx <= r; dx++) {
+      if (dx * dx + dy * dy > r * r) continue
+      const xi = Math.floor(x) + dx
+      const yi = Math.floor(y) + dy
+      if (xi < 0 || yi < 0 || xi >= f.width || yi >= f.height) continue
+      const d = decodeDbz(f.values[yi * f.width + xi])
+      if (d && (best === null || d.dbz > best)) best = d.dbz
+    }
+  }
+  return best
+}

@@ -67,7 +67,7 @@ export default function SettingsPage() {
 
       <Card title="Upozornění do telefonu">
         <p className="text-sm">
-          Upozornění na mráz a náledí, bouřky, silný déšť a vítr, smog, oficiální výstrahy ČHMÚ a ranní souhrn v 6:30 posílá každou hodinu automatická kontrola na GitHubu přes bezplatnou službu ntfy.
+          Upozornění „brzy začne pršet“ (asi 20–60 min předem podle radaru ČHMÚ, ne v noci 22–6 h), mráz a náledí, bouřky, silný déšť a vítr, smog, oficiální výstrahy ČHMÚ a ranní souhrn v 6:30 posílá každých 10 minut automatická kontrola na GitHubu přes bezplatnou službu ntfy.
         </p>
         <ol className="mt-2 space-y-1 text-sm">
           <Step n={1}>Nainstalujte aplikaci ntfy (Google Play / App Store, zdarma).</Step>

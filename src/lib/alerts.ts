@@ -3,8 +3,10 @@
 import { ALERT_RULES as R } from '../config.ts'
 import type { WarningItem } from './dataTypes.ts'
 import { kmh, num, temp } from './format.ts'
+import { dbzToMmh } from './radarPalette.ts'
+import { intensityWord } from './rain.ts'
 import { mean } from './stats.ts'
-import { addDays, DAY, formatDayMonth, formatMoment, formatTime, formatWeekdayLong, HOUR, localDateKey, localMidnight, localParts } from './time.ts'
+import { addDays, DAY, formatDayMonth, formatMoment, formatTime, formatWeekdayLong, HOUR, localDateKey, localMidnight, localParts, MINUTE } from './time.ts'
 import { dayCode, isFreezingPrecip, isThunder, wmoLabel } from './wmo.ts'
 
 type Arr = (number | null)[]
@@ -209,6 +211,89 @@ export function evaluateAlerts({ now, forecast: f, air, warnings = [] }: AlertIn
   }
 
   return out
+}
+
+// ------------------------------------------------------------------ Brzy začne pršet
+
+export interface RadarPoint {
+  t: number
+  /** Nejvyšší odrazivost v okruhu kolem Karviné (null = bez srážek) */
+  dbz: number | null
+}
+
+export interface RainSoonInput {
+  now: number
+  /** Radar ČHMÚ (skutečnost) po 5 min za poslední ~2 h: nejvyšší dBZ do radiusKm */
+  obsHere: RadarPoint[]
+  /** Nejvyšší dBZ do confirmKm na posledním radarovém snímku */
+  obsNearby: number | null
+  /** Nowcasting ČHMÚ po 10 min: nejvyšší dBZ do radiusKm */
+  nowcastHere: RadarPoint[]
+  /** Model ICON-D2 po 15 min (Open-Meteo minutely_15) */
+  quarters: { start: number; end: number; mm: number }[]
+  /** Teplota teď (°C) – sníh místo deště */
+  tempC: number | null
+  /** Kdy naposledy odešlo toto upozornění */
+  lastSentAt: number | null
+}
+
+/**
+ * Upozornění „Brzy začne pršet“ 0–60 min předem. Přednost má nowcasting ČHMÚ (posouvá skutečné
+ * srážkové buňky), model ICON-D2 jen tehdy, když radar srážky v okolí už vidí (jinak plané poplachy).
+ * Neposílá se, když právě prší nebo pršelo v poslední hodině (stejný déšť), v noci a častěji než po 3 h.
+ */
+export function rainSoonAlert(i: RainSoonInput): Alert | null {
+  const S = R.rainSoon
+  const { now } = i
+  const hour = localParts(now).hour
+  if (hour >= S.quiet.from || hour < S.quiet.to) return null
+  if (i.lastSentAt != null && now - i.lastSentAt < S.cooldownHours * HOUR) return null
+  const wet = (p: RadarPoint) => p.dbz != null && p.dbz >= S.minDbz
+  const obs = i.obsHere.filter((p) => p.t <= now).sort((a, b) => a.t - b.t)
+  const last = obs.at(-1)
+  // Bez čerstvého radaru nelze poznat, jestli už neprší – raději nic neposílat
+  if (!last || now - last.t > S.maxRadarAgeMinutes * MINUTE) return null
+  if (obs.some((p) => p.t > now - S.episodeGapMinutes * MINUTE && wet(p))) return null
+
+  const horizon = now + S.leadMinutes * MINUTE
+  let start: number
+  let rate: number
+  let byRadar: boolean
+  // Snímky nowcastingu navazují na poslední radar; ty, které už „proběhly“, znamenají déšť právě teď
+  const nc = i.nowcastHere.filter((p) => p.t > last.t && p.t <= horizon).sort((a, b) => a.t - b.t)
+  const firstNc = nc.find(wet)
+  if (firstNc) {
+    start = Math.max(now, firstNc.t)
+    rate = dbzToMmh(Math.max(...nc.filter(wet).map((p) => p.dbz!)))
+    byRadar = true
+  } else {
+    const q = i.quarters.filter((x) => x.end > now && x.start < horizon && x.mm >= S.modelMinMm).sort((a, b) => a.start - b.start)
+    if (!q.length || i.obsNearby == null || i.obsNearby < S.minDbz) return null
+    start = Math.max(now, q[0].start)
+    rate = Math.max(...q.map((x) => x.mm)) * 4
+    byRadar = false
+  }
+
+  const snow = i.tempC != null && i.tempC <= 0.5
+  const verb = snow ? 'sněžit' : 'pršet'
+  const minutes = Math.round((start - now) / MINUTE / 5) * 5
+  const when = minutes <= 5 ? 'Během několika minut' : `Za ${minutes} min (kolem ${formatTime(start)})`
+  return {
+    key: `rainsoon:${new Date(now).toISOString().slice(0, 16)}`,
+    title: snow ? 'Brzy začne sněžit' : 'Brzy začne pršet',
+    message:
+      `${when} začne v Karviné ${verb} – ${intensityWord(rate)} (asi ${num(rate, rate < 1 ? 1 : 0)} mm/h).\n` +
+      (byRadar ? 'Podle nowcastingu ČHMÚ (posun srážek, které zachytil radar).' : 'Podle modelu ICON-D2; radar srážky v okolí už zachytil.'),
+    priority: 3,
+    tags: [snow ? 'snowflake' : 'umbrella'],
+  }
+}
+
+/** Kdy naposledy odešlo upozornění s daným začátkem klíče */
+export function lastSentAt(state: AlertState, prefix: string): number | null {
+  let best: number | null = null
+  for (const [k, v] of Object.entries(state.sent)) if (k.startsWith(prefix) && (best == null || Date.parse(v) > best)) best = Date.parse(v)
+  return best
 }
 
 /** Ranní souhrn dne */

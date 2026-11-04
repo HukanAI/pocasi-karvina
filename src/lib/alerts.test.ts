@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
-import { type AlertForecast, evaluateAlerts, isSummaryTime, morningSummary, newAlerts, nightMin, recordSent } from './alerts.ts'
+import { type AlertForecast, evaluateAlerts, isSummaryTime, lastSentAt, morningSummary, newAlerts, nightMin, type RainSoonInput, rainSoonAlert, recordSent } from './alerts.ts'
 import type { WarningItem } from './dataTypes.ts'
-import { DAY, HOUR, localMidnight } from './time.ts'
+import { DAY, HOUR, localMidnight, MINUTE } from './time.ts'
 
 // „Teď“ = čtvrtek 29. 10. 2026 12:00 místního času (CET = UTC+1)
 const NOW = Date.UTC(2026, 9, 29, 11, 0)
@@ -175,5 +175,71 @@ describe('ranní souhrn', () => {
     expect(s?.message).toContain('2 °C až 10 °C')
     expect(s?.message).toContain('−1,2 °C')
     expect(s?.title).toMatch(/čtvrtek 29\. ?10\./)
+  })
+})
+
+describe('brzy začne pršet', () => {
+  // NOW = 12:00 místního času; poslední radarový snímek 11:55, nowcasting po 10 min dál
+  const obs = (wetAt: number[] = [], dbz = 25) =>
+    Array.from({ length: 24 }, (_, k) => NOW - 5 * MINUTE - (23 - k) * 5 * MINUTE).map((t) => ({ t, dbz: wetAt.includes(t) ? dbz : null }))
+  const nowcast = (wetFromMin: number | null, dbz = 30) =>
+    Array.from({ length: 6 }, (_, k) => NOW - 5 * MINUTE + (k + 1) * 10 * MINUTE).map((t) => ({ t, dbz: wetFromMin != null && t >= NOW + wetFromMin * MINUTE ? dbz : null }))
+  const quarters = (wetFromMin: number | null, mm = 0.3) =>
+    Array.from({ length: 8 }, (_, k) => NOW - 15 * MINUTE + k * 15 * MINUTE).map((start) => ({ start, end: start + 15 * MINUTE, mm: wetFromMin != null && start >= NOW + wetFromMin * MINUTE ? mm : 0 }))
+  const input = (o: Partial<RainSoonInput> = {}): RainSoonInput => ({
+    now: NOW,
+    obsHere: obs(),
+    obsNearby: null,
+    nowcastHere: nowcast(null),
+    quarters: quarters(null),
+    tempC: 8,
+    lastSentAt: null,
+    ...o,
+  })
+
+  it('nowcasting: srážky dorazí za ~25 min → upozornění s časem a intenzitou', () => {
+    const a = rainSoonAlert(input({ nowcastHere: nowcast(25) }))
+    expect(a?.title).toBe('Brzy začne pršet')
+    expect(a?.message).toMatch(/^Za 25 min \(kolem 12:25\) začne v Karviné pršet – mírné srážky \(asi 3 mm\/h\)\.\nPodle nowcastingu ČHMÚ/)
+  })
+  it('právě prší nebo pršelo v poslední hodině → nic (stejný déšť)', () => {
+    expect(rainSoonAlert(input({ obsHere: obs([NOW - 5 * MINUTE]), nowcastHere: nowcast(15) }))).toBeNull()
+    expect(rainSoonAlert(input({ obsHere: obs([NOW - 50 * MINUTE]), nowcastHere: nowcast(15) }))).toBeNull()
+    expect(rainSoonAlert(input({ obsHere: obs([NOW - 70 * MINUTE]), nowcastHere: nowcast(15) }))).not.toBeNull()
+  })
+  it('mrholení pod prahem (10 dBZ) → nic', () => {
+    expect(rainSoonAlert(input({ nowcastHere: nowcast(15, 10) }))).toBeNull()
+  })
+  it('noční klid 22–6 h', () => {
+    const at = (h: number) => rainSoonAlert(input({ now: NOW + (h - 12) * HOUR, obsHere: obs().map((p) => ({ ...p, t: p.t + (h - 12) * HOUR })), nowcastHere: nowcast(15).map((p) => ({ ...p, t: p.t + (h - 12) * HOUR })) }))
+    expect(at(22)).toBeNull()
+    expect(at(5)).toBeNull()
+    expect(at(6)).not.toBeNull()
+    expect(at(21)).not.toBeNull()
+  })
+  it('nejvýš jednou za 3 hodiny', () => {
+    expect(rainSoonAlert(input({ nowcastHere: nowcast(15), lastSentAt: NOW - 2 * HOUR }))).toBeNull()
+    expect(rainSoonAlert(input({ nowcastHere: nowcast(15), lastSentAt: NOW - 3 * HOUR }))).not.toBeNull()
+  })
+  it('model jen s potvrzením radaru v okolí', () => {
+    expect(rainSoonAlert(input({ quarters: quarters(30) }))).toBeNull()
+    const a = rainSoonAlert(input({ quarters: quarters(30), obsNearby: 20 }))
+    expect(a?.message).toMatch(/^Za 30 min \(kolem 12:30\).*\nPodle modelu ICON-D2/s)
+    // srážky mimo hodinové okno se nehlásí
+    expect(rainSoonAlert(input({ quarters: quarters(75), obsNearby: 20 }))).toBeNull()
+  })
+  it('starý radar (výpadek dat) → nic', () => {
+    expect(rainSoonAlert(input({ obsHere: obs().map((p) => ({ ...p, t: p.t - 40 * MINUTE })), nowcastHere: nowcast(15) }))).toBeNull()
+  })
+  it('déšť hned → „během několika minut“; mráz → sněžení', () => {
+    expect(rainSoonAlert(input({ nowcastHere: nowcast(0) }))?.message).toMatch(/^Během několika minut začne v Karviné pršet/)
+    const s = rainSoonAlert(input({ nowcastHere: nowcast(25), tempC: 0 }))
+    expect(s?.title).toBe('Brzy začne sněžit')
+    expect(s?.tags).toEqual(['snowflake'])
+  })
+  it('lastSentAt najde poslední odeslání podle začátku klíče', () => {
+    const st = { sent: { 'rainsoon:a': '2026-10-29T08:00:00.000Z', 'rainsoon:b': '2026-10-29T09:00:00.000Z', 'storm:x': '2026-10-29T10:00:00.000Z' } }
+    expect(lastSentAt(st, 'rainsoon:')).toBe(Date.parse('2026-10-29T09:00:00.000Z'))
+    expect(lastSentAt({ sent: {} }, 'rainsoon:')).toBeNull()
   })
 })

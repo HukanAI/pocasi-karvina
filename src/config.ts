@@ -74,6 +74,30 @@ export const ALERT_RULES = {
   pm10DailyAbove: 50,
   /** Denní průměr PM2.5 (µg/m³), ostře větší (denní limit EU od 2030 je 25) */
   pm25DailyAbove: 25,
+  /**
+   * „Brzy začne pršet“: nowcasting ČHMÚ (posun skutečných srážek z radaru), záložně model ICON-D2,
+   * pokud radar srážky v okolí už vidí. Kontrola běží každých 10 min.
+   */
+  rainSoon: {
+    /** Odrazivost, od které jde o déšť (dBZ; 14 ≈ 0,3 mm/h – slabší je mrholení nebo šum radaru) */
+    minDbz: 14,
+    /** Jak daleko dopředu hlídat (min) */
+    leadMinutes: 60,
+    /** Okruh kolem Karviné (km) – nowcasting se v poloze srážek o pár km splete */
+    radiusKm: 4,
+    /** Model se bere vážně, jen když radar už srážky vidí do této vzdálenosti (km) */
+    confirmKm: 40,
+    /** Model: úhrn za 15 min (mm) */
+    modelMinMm: 0.1,
+    /** Pršelo-li v této době, jde o stejný déšť a upozornění se neposílá (min) */
+    episodeGapMinutes: 60,
+    /** Nejdříve po této době další upozornění (h) */
+    cooldownHours: 3,
+    /** Noční klid, místní čas (od–do hodin) */
+    quiet: { from: 22, to: 6 },
+    /** Radar starší než tohle se nepoužije (min) */
+    maxRadarAgeMinutes: 30,
+  },
   /** Ranní souhrn, místní čas */
   morningSummary: { hour: 6, minute: 30, latestHour: 10 },
 } as const

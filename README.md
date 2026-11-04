@@ -12,7 +12,7 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 - **Radar** (ve stylu Windy, jedna časová osa): radar ČHMÚ za poslední 2 h (1 km, po 5 min) → nowcasting ČHMÚ na 1 h → model ČHMÚ ALADIN na 24 h (2,3 km, celá střední Evropa)
 - **Ovzduší**: index EAQI, PM10, PM2,5, NO₂, O₃, SO₂, CO, denní průměry vs. limity, pyl
 - **Historie**: normál 1991–2020, rekordy dne, tento den v minulých letech (od 1877), letošní rok po měsících, kumulativní srážky, charakteristické dny, klimatický trend a „warming stripes“, suchá období, srovnání libovolných dvou let. Zdroj lze přepnout mezi měřením ČHMÚ a reanalýzou ERA5.
-- **Upozornění do telefonu** (přes aplikaci ntfy): mráz, náledí, bouřky, přívalový déšť, vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30
+- **Upozornění do telefonu** (přes aplikaci ntfy): **brzy začne pršet** (20–60 min předem z nowcastingu ČHMÚ, záložně model ICON-D2 potvrzený radarem; jen 6–22 h, nejvýš jednou za 3 h, ne během deště), mráz, náledí, bouřky, přívalový déšť, vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30
 
 ## Zdroje dat
 
@@ -108,6 +108,8 @@ Ověřené konvence dat ČHMÚ (testováno na skutečných datech):
   paleta: index 195 = 4–8 dBZ … 181 = ≥ 60 dBZ (po 4 dBZ), 242 = mimo dosah. Umístění ověřeno proti srážkoměru Karviná (korelace 0,76)
 - ALADIN `MAXSIM_REFLECTI` se pro srážky nehodí (při 1–3 mm/h jen ~3 dBZ), proto se používají hodinové přírůstky `SURFRAINFALL` + `SURFSNOWFALL`;
   Lambertova mřížka ověřena proti lat/lon variantě téhož běhu (korelace 0,96, posun ~1 km)
+- radar (pseudoCAPPI ve výšce 2 km) nezachytí nízké mrholení: 29.–30. 10. 2026 stanice naměřila 0,4–1,1 mm, radar v okruhu 40 km nic.
+  Upozornění „brzy začne pršet“ proto u mrholení nepřijde; zpětný test 30. 10.–1. 11.: přes den 4 z 4 přeháněk s předstihem 50–80 min, 1 planý poplach
 - teplotní řada stanice nemá úplná data (≥ 90 % dní) pro roky 1878, 1884–1897, 1939–1949, 1979–1987 a 2008–2011
 
 ## Licence dat
