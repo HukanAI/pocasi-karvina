@@ -38,34 +38,47 @@ jobs:
 
       - name: Načtení větve data
         run: |
-          # Exit kód 2 = větev neexistuje; jiná chyba (síť) musí běh zastavit, jinak by se větev přepsala prázdnými daty
-          set +e
-          git ls-remote --exit-code --heads origin data >/dev/null
-          code=$?
-          set -e
-          if [ "$code" = "0" ]; then
-            git clone --depth 1 --branch data "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data-branch
-          elif [ "$code" = "2" ]; then
-            echo "Větev data zatím neexistuje, vytvořím ji."
-            mkdir -p data-branch
-          else
-            echo "::error::Nelze ověřit větev data (kód $code)"
-            exit 1
-          fi
+          # Exit kód 2 = větev neexistuje. Jiná chyba (síť, výpadek GitHubu) se zkusí znovu; když GitHub
+          # zůstane nedostupný, zbytek běhu se přeskočí (nesmí se zapsat prázdná data přes existující větev)
+          # a běh skončí jen varováním – další běh za 10 minut vše dožene a zbytečně nechodí e-mail o chybě.
+          for attempt in 1 2 3 4; do
+            set +e
+            git ls-remote --exit-code --heads origin data >/dev/null
+            code=$?
+            if [ "$code" = "0" ]; then
+              rm -rf data-branch
+              git clone -q --depth 1 --branch data "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" data-branch && exit 0
+              code=clone
+            fi
+            set -e
+            if [ "$code" = "2" ]; then
+              echo "Větev data zatím neexistuje, vytvořím ji."
+              mkdir -p data-branch
+              exit 0
+            fi
+            echo "Pokus $attempt: větev data nelze načíst (kód $code)"
+            [ "$attempt" = "4" ] || sleep $((attempt * 15))
+          done
+          echo "::warning::GitHub je nedostupný, větev data nelze načíst – běh se přeskočí, další ho dožene."
+          echo "SKIP=1" >> "$GITHUB_ENV"
 
       - name: Měření ČHMÚ Karviná
+        if: env.SKIP != '1'
         continue-on-error: true
         run: node scripts/update-station.ts
 
       - name: Výstrahy
+        if: env.SKIP != '1'
         continue-on-error: true
         run: node scripts/fetch-warnings.ts
 
       - name: Radar a předpověď srážek ČHMÚ (radar, nowcasting, model ALADIN)
+        if: env.SKIP != '1'
         continue-on-error: true
         run: node scripts/update-radar.ts
 
       - name: Klimatické řady (když jsou starší než 20 h nebo na vyžádání)
+        if: env.SKIP != '1'
         continue-on-error: true
         run: |
           if [ "${{ inputs.full }}" = "true" ]; then
@@ -75,6 +88,7 @@ jobs:
           fi
 
       - name: Upozornění (ntfy)
+        if: env.SKIP != '1'
         continue-on-error: true
         env:
           NTFY_TOPIC: ${{ secrets.NTFY_TOPIC }}
@@ -87,6 +101,7 @@ jobs:
           fi
 
       - name: Uložení do větve data
+        if: env.SKIP != '1'
         working-directory: data-branch
         run: |
           git config --global user.name "github-actions[bot]"
@@ -101,10 +116,25 @@ jobs:
             git add -A
             git commit -q -m "Data $(date -u +'%Y-%m-%d %H:%M') UTC"
           fi
-          git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:data
-          ls -la
+          # GitHub občas vrátí „Internal Server Error“ (krátké výpadky) → několik pokusů s rostoucí pauzou
+          for attempt in 1 2 3 4; do
+            if out=$(git push -q -f "https://x-access-token:${{ github.token }}@github.com/${{ github.repository }}.git" HEAD:data 2>&1); then
+              echo "Uloženo (pokus $attempt)."
+              exit 0
+            fi
+            echo "Pokus $attempt selhal: $out"
+            [ "$attempt" = "4" ] || sleep $((attempt * 15))
+          done
+          # Výpadek na straně GitHubu: jen varování, data uloží další běh. Jiná chyba (oprávnění…) běh shodí.
+          if echo "$out" | grep -qiE "internal server error|50[0-9]|timed out|could not resolve|connection (reset|refused)|unable to access"; then
+            echo "::warning::GitHub data nepřijal (výpadek na jeho straně), uloží je další běh."
+            exit 0
+          fi
+          echo "::error::Uložení do větve data selhalo."
+          exit 1
 
       - name: Udržení workflow v chodu
+        if: env.SKIP != '1'
         continue-on-error: true
         env:
           GH_TOKEN: ${{ github.token }}
