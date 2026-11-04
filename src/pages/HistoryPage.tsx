@@ -5,6 +5,7 @@ import type { EChartsOption } from 'echarts'
 import { useMemo, useState } from 'react'
 import { axisStyle, baseOption, useChartColors } from '../components/charts/chartTheme.ts'
 import { EChart } from '../components/charts/EChart.tsx'
+import { MonthPrecipCard } from '../components/history/MonthPrecipCard.tsx'
 import { Card, ErrorCard, LoadingCard, Segmented, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, NORMAL_PERIOD } from '../config.ts'
 import {
@@ -47,6 +48,7 @@ export default function HistoryPage() {
 
   return (
     <div className="space-y-3 pb-4">
+      <MonthPrecipCard />
       <Card title="Zdroj historických dat">
         <Segmented
           value={src}

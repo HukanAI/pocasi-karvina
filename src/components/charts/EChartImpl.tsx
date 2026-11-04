@@ -12,6 +12,7 @@ import {
   VisualMapComponent,
 } from 'echarts/components'
 import * as echarts from 'echarts/core'
+import { LabelLayout } from 'echarts/features'
 import { CanvasRenderer } from 'echarts/renderers'
 import { useEffect, useRef } from 'react'
 
@@ -28,6 +29,7 @@ echarts.use([
   MarkAreaComponent,
   DataZoomComponent,
   VisualMapComponent,
+  LabelLayout,
   CanvasRenderer,
 ])
 
