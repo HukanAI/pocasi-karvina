@@ -29,7 +29,7 @@ import {
 import { mm, num, plural, signed, temp } from '../lib/format.ts'
 import { mean, percentileRank, round } from '../lib/stats.ts'
 import { addDays, daysBetween, formatFullDate, localDateKey, localMidnight, localParts } from '../lib/time.ts'
-import { useNow } from '../state/derived.ts'
+import { useNow, useTodayRange } from '../state/derived.ts'
 import { useEra5Daily, useForecast, useStationDaily } from '../state/queries.ts'
 import { useSettings } from '../state/useSettings.ts'
 
@@ -96,13 +96,18 @@ function HistoryContent({ s }: { s: DailySeries }) {
 
 function TodayVsNormal({ s, today, month, day, year }: { s: DailySeries; today: string; month: number; day: number; year: number }) {
   const f = useForecast()
+  // Max/min dneška stejné jako v nadpisu na stránce Dnes (naměřeno od půlnoci + zbytek dne z předpovědi)
+  const range = useTodayRange(useNow(60_000))
   const yesterday = addDays(today, -1)
   const nMax = dayNormal(s, 'tmax', month, day)
   const nMin = dayNormal(s, 'tmin', month, day)
   const nMean = dayNormal(s, 'tmean', month, day)
   const rec = dayRecords(s, month, day, year - 1)
   const di = f.data ? f.data.daily.time.findIndex((t) => localDateKey(t) === today) : -1
-  const fc = di >= 0 && f.data ? { tmax: f.data.daily.temperature_2m_max[di], tmin: f.data.daily.temperature_2m_min[di], tmean: f.data.daily.temperature_2m_mean[di] } : null
+  const fc =
+    di >= 0 && f.data
+      ? { tmax: range?.tmax ?? f.data.daily.temperature_2m_max[di], tmin: range?.tmin ?? f.data.daily.temperature_2m_min[di], tmean: f.data.daily.temperature_2m_mean[di] }
+      : null
 
   // Percentil dnešního maxima mezi všemi maximy v okně ±7 dní normálového období
   const window = dayWindowValues(s, 'tmax', month, day).values
@@ -119,7 +124,7 @@ function TodayVsNormal({ s, today, month, day, year }: { s: DailySeries; today: 
       <table className="tabular w-full text-sm">
         <thead>
           <tr className="text-xs text-muted">
-            <th className="text-left font-medium">Dnes (předpověď)</th>
+            <th className="text-left font-medium">{range?.measured ? 'Dnes (měření + předpověď)' : 'Dnes (předpověď)'}</th>
             <th className="text-right font-medium">Hodnota</th>
             <th className="text-right font-medium">Normál</th>
             <th className="text-right font-medium">Odchylka</th>

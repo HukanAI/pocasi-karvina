@@ -15,7 +15,9 @@ import {
   type PrecipSample,
   rainState,
 } from '../lib/rain.ts'
-import { HOUR, MINUTE } from '../lib/time.ts'
+import { blendTemps, lastTempObs } from '../lib/stationTimeline.ts'
+import { HOUR, localDateKey, MINUTE } from '../lib/time.ts'
+import { todayRange } from '../lib/todayRange.ts'
 import { effectiveCode, isPrecipCode, measuredPrecipCode, wmoSky } from '../lib/wmo.ts'
 import { useForecast, useStationNow, useStationSra } from './queries.ts'
 import { useSettings } from './useSettings.ts'
@@ -162,6 +164,43 @@ export function useNowTemp(now: number): number | null {
   const f = useForecast()
   const st = useStationNow()
   return isStationFresh(st.data, now) ? st.data!.last!.T! : (f.data?.current.temperature_2m ?? null)
+}
+
+/**
+ * Hodinová teplota předpovědi napojená na poslední měření ČHMÚ (zarovnaná s forecast.hourly.time).
+ * Používají ji hodinová předpověď, graf naměřeno → předpověď, max/min dneška i detail dne,
+ * takže stejná hodina má všude stejnou teplotu.
+ */
+export function useHourlyTemps(): (number | null)[] | null {
+  const f = useForecast()
+  const st = useStationNow()
+  return useMemo(() => {
+    if (!f.data) return null
+    return blendTemps(f.data.hourly.time, f.data.hourly.temperature_2m, lastTempObs(st.data?.series)).temps
+  }, [f.data, st.data])
+}
+
+/**
+ * Max a min dneška – stejné v nadpisu, v předpovědi po dnech i v Historii: naměřeno od půlnoci (ČHMÚ)
+ * + zbytek dne podle hodinové předpovědi napojené na měření. Bez čerstvého měření denní hodnoty modelu.
+ */
+export function useTodayRange(now: number): { tmax: number | null; tmin: number | null; measured: boolean } | null {
+  const f = useForecast()
+  const st = useStationNow()
+  const temps = useHourlyTemps()
+  return useMemo(() => {
+    if (!f.data || !temps) return null
+    const todayKey = localDateKey(now)
+    const di = f.data.daily.time.findIndex((t) => localDateKey(t + 12 * HOUR) === todayKey)
+    const measured = isStationFresh(st.data, now) && st.data!.today?.date === todayKey ? st.data!.today : null
+    const r = todayRange(
+      { time: f.data.hourly.time, temperature_2m: temps },
+      measured,
+      { tmax: di >= 0 ? f.data.daily.temperature_2m_max[di] : null, tmin: di >= 0 ? f.data.daily.temperature_2m_min[di] : null },
+      now,
+    )
+    return { ...r, measured: !!measured && measured.tmax != null && measured.tmin != null }
+  }, [f.data, st.data, temps, now])
 }
 
 /** Podklady pro pozadí: druh oblohy, fáze dne, intenzita srážek */

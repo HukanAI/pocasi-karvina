@@ -5,8 +5,7 @@ import { dayNormal } from '../../lib/climate.ts'
 import { num, signed, tempShort } from '../../lib/format.ts'
 import { formatAgo, formatTime, localDateKey, localParts } from '../../lib/time.ts'
 import { wmoIcon, wmoLabel } from '../../lib/wmo.ts'
-import { todayRange } from '../../lib/todayRange.ts'
-import { isStationFresh, useCurrentWeather, useNow, useNowTemp } from '../../state/derived.ts'
+import { isStationFresh, useCurrentWeather, useNow, useNowTemp, useTodayRange } from '../../state/derived.ts'
 import { useForecast, useStationDaily, useStationNow } from '../../state/queries.ts'
 import { Pill, Skeleton } from '../ui.tsx'
 import { WeatherIcon } from '../WeatherIcon.tsx'
@@ -18,6 +17,7 @@ export function Hero() {
   const daily = useStationDaily()
   const cw = useCurrentWeather(now)
   const nowTemp = useNowTemp(now)
+  const range = useTodayRange(now)
 
   if (!f.data || !cw) {
     return (
@@ -32,13 +32,8 @@ export function Hero() {
   const temp = nowTemp
   const todayKey = localDateKey(now)
   const di = f.data.daily.time.findIndex((t) => localDateKey(t + 12 * 3_600_000) === todayKey)
-  const measured = fresh && st.data!.today?.date === todayKey ? st.data!.today : null
-  const { tmax, tmin } = todayRange(
-    f.data.hourly,
-    measured,
-    { tmax: di >= 0 ? f.data.daily.temperature_2m_max[di] : null, tmin: di >= 0 ? f.data.daily.temperature_2m_min[di] : null },
-    now,
-  )
+  const tmax = range?.tmax ?? null
+  const tmin = range?.tmin ?? null
   const tmean = di >= 0 ? f.data.daily.temperature_2m_mean[di] : null
 
   // Odchylka dnešního průměru (model) od normálu 1991–2020 (stanice ČHMÚ)

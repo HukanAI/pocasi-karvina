@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { buildTimeline, type HourlyForecast, interpHourly, type StationSeries } from './stationTimeline.ts'
+import { blendTemps, buildTimeline, type HourlyForecast, interpHourly, lastTempObs, type StationSeries } from './stationTimeline.ts'
 
 const MIN = 60_000
 const H = 60 * MIN
@@ -99,5 +99,37 @@ describe('interpHourly', () => {
     expect(interpHourly(time, [0, 6, null], H)).toBe(6)
     expect(interpHourly(time, [0, 6, null], 90 * MIN)).toBeNull()
     expect(interpHourly(time, [0, 6, 1], 3 * H)).toBeNull()
+  })
+})
+
+describe('blendTemps a lastTempObs', () => {
+  const time = [0, 1, 2, 3, 4, 5, 6, 7, 8].map((k) => k * H)
+  const model = time.map(() => 10)
+
+  it('posun na měření slábne lineárně do 6 h, hodiny do měření beze změny', () => {
+    const r = blendTemps(time, model, { t: H, T: 7 })
+    expect(r.offset).toBe(-3)
+    // 1 h = čas měření (beze změny), 2 h: −3·5/6, 4 h: −3·3/6, 7 h a dál: model
+    expect(r.temps).toEqual([10, 10, 7.5, 8, 8.5, 9, 9.5, 10, 10])
+  })
+
+  it('bez měření nebo mimo rozsah modelu se nic nemění', () => {
+    expect(blendTemps(time, model, null)).toEqual({ temps: model, offset: null })
+    expect(blendTemps(time, model, { t: 20 * H, T: 0 }).offset).toBeNull()
+  })
+
+  it('stejné hodnoty jako graf naměřeno → předpověď', () => {
+    const fc = forecast()
+    const st = station()
+    const tl = buildTimeline(st, fc, now)
+    const r = blendTemps(fc.time, fc.temperature_2m, lastTempObs(st, now))
+    for (const h of tl.hours.filter((x) => x.tempSrc === 'forecast')) expect(h.temp).toBe(r.temps[fc.time.indexOf(h.t)])
+  })
+
+  it('poslední naměřená teplota přeskočí chybějící hodnoty a budoucnost', () => {
+    const st = { start: 0, step: 10 * MIN, T: [1, 2, null, null] }
+    expect(lastTempObs(st)).toEqual({ t: 10 * MIN, T: 2 })
+    expect(lastTempObs(st, 5 * MIN)).toEqual({ t: 0, T: 1 })
+    expect(lastTempObs(null)).toBeNull()
   })
 })

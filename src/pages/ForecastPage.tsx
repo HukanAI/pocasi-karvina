@@ -1,19 +1,21 @@
 // Předpověď: 16 dní s detailem, nejistota (ensemble ECMWF) a srovnání modelů
 
 import type { EChartsOption } from 'echarts'
-import { useMemo, useState } from 'react'
+import { useCallback, useMemo, useState } from 'react'
 import type { Ensemble, Forecast, ModelsForecast } from '../api/openMeteo.ts'
 import { axisStyle, baseOption, type ChartColors, useChartColors } from '../components/charts/chartTheme.ts'
 import { EChart } from '../components/charts/EChart.tsx'
 import { Card, ErrorCard, LoadingCard, Segmented, SourceNote, StaleNote } from '../components/ui.tsx'
+import { TimelineChart } from '../components/today/TimelineChart.tsx'
 import { WeatherIcon } from '../components/WeatherIcon.tsx'
 import { MODELS } from '../config.ts'
 import { kmh, mm, num, tempShort, uvLabel, windDir } from '../lib/format.ts'
 import { mean } from '../lib/stats.ts'
 import { DAY, formatDayMonth, formatDuration, formatTime, formatWeekdayLong, formatWeekdayShort, localDateKey } from '../lib/time.ts'
+import { buildTimeline } from '../lib/stationTimeline.ts'
 import { dayCode, wmoIcon, wmoLabel } from '../lib/wmo.ts'
-import { useNow } from '../state/derived.ts'
-import { useEnsemble, useForecast, useModels } from '../state/queries.ts'
+import { useNow, useTodayRange } from '../state/derived.ts'
+import { useEnsemble, useForecast, useModels, useStationNow } from '../state/queries.ts'
 
 export default function ForecastPage() {
   const f = useForecast()
@@ -48,7 +50,7 @@ function Drop() {
 }
 
 /** Graf teplot a srážek na 16 dní – trend je vidět na první pohled */
-function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number }[] }) {
+function OverviewChart({ f, days, tmax, tmin }: { f: Forecast; days: { t: number; i: number }[]; tmax: (k: number, i: number) => number | null; tmin: (k: number, i: number) => number | null }) {
   const c = useChartColors()
   const d = f.daily
   const option: EChartsOption = useMemo(
@@ -61,7 +63,7 @@ function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number 
         formatter: (ps: unknown) => {
           const k = (ps as { dataIndex: number }[])[0].dataIndex
           const { t, i } = days[k]
-          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(dayCode(f, i))}<br/>max ${tempShort(d.temperature_2m_max[i])}, min ${tempShort(d.temperature_2m_min[i])}<br/>srážky ${mm(d.precipitation_sum[i])} (${num(d.precipitation_probability_max[i], 0)} %)`
+          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(dayCode(f, i))}<br/>max ${tempShort(tmax(k, i))}, min ${tempShort(tmin(k, i))}<br/>srážky ${mm(d.precipitation_sum[i])} (${num(d.precipitation_probability_max[i], 0)} %)`
         },
       },
       xAxis: { type: 'category', data: days.map(({ t }, k) => (k < 2 ? dayName(t, k) : `${formatWeekdayShort(t)}\n${formatDayMonth(t)}`)), ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 9, interval: 1 } },
@@ -80,11 +82,11 @@ function OverviewChart({ f, days }: { f: Forecast; days: { t: number; i: number 
           itemStyle: { color: c.rain, opacity: 0.45, borderRadius: [3, 3, 0, 0] },
           barMaxWidth: 10,
         },
-        { name: 'Max', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }) => d.temperature_2m_max[i]), lineStyle: { color: c.warm, width: 2.5 }, itemStyle: { color: c.warm } },
-        { name: 'Min', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }) => d.temperature_2m_min[i]), lineStyle: { color: c.cold, width: 2.5 }, itemStyle: { color: c.cold } },
+        { name: 'Max', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }, k) => tmax(k, i)), lineStyle: { color: c.warm, width: 2.5 }, itemStyle: { color: c.warm } },
+        { name: 'Min', type: 'line', smooth: true, symbolSize: 5, data: days.map(({ i }, k) => tmin(k, i)), lineStyle: { color: c.cold, width: 2.5 }, itemStyle: { color: c.cold } },
       ],
     }),
-    [c, d, days, f],
+    [c, d, days, f, tmax, tmin],
   )
   return <EChart option={option} height={190} />
 }
@@ -95,11 +97,17 @@ function DailyList({ f, updatedAt, error }: { f: Forecast; updatedAt: number; er
   const [open, setOpen] = useState<string | null>(null)
   const d = f.daily
   const days = useMemo(() => d.time.map((t, i) => ({ t, i, key: localDateKey(t) })).filter((x) => x.key >= today), [d, today])
+  // Dnešek: naměřeno od půlnoci + zbytek dne z předpovědi – stejné max/min jako v nadpisu na stránce Dnes
+  const range = useTodayRange(now)
+  const rMax = range?.tmax ?? null
+  const rMin = range?.tmin ?? null
+  const tmaxOf = useCallback((k: number, i: number) => (k === 0 && days[0]?.key === today && rMax != null ? rMax : d.temperature_2m_max[i]), [days, today, rMax, d])
+  const tminOf = useCallback((k: number, i: number) => (k === 0 && days[0]?.key === today && rMin != null ? rMin : d.temperature_2m_min[i]), [days, today, rMin, d])
 
   return (
     <>
       <Card title="Teploty a srážky na 16 dní" subtitle="Oranžová = nejvyšší denní teplota, modrá = noční minimum, sloupce = šance na srážky">
-        <OverviewChart f={f} days={days} />
+        <OverviewChart f={f} days={days} tmax={tmaxOf} tmin={tminOf} />
       </Card>
       <Card title="Předpověď po dnech" subtitle="Klepnutím na den zobrazíte průběh po hodinách" pad={false} className="pb-2">
         <div className="flex items-center gap-2 px-4 pb-1 text-[10px] font-semibold tracking-wide text-faint uppercase">
@@ -111,8 +119,8 @@ function DailyList({ f, updatedAt, error }: { f: Forecast; updatedAt: number; er
         </div>
         <ul className="divide-soft px-2">
           {days.map(({ t, i, key }, k) => {
-            const tmin = d.temperature_2m_min[i]
-            const tmax = d.temperature_2m_max[i]
+            const tmin = tminOf(k, i)
+            const tmax = tmaxOf(k, i)
             const prob = d.precipitation_probability_max[i]
             const sum = d.precipitation_sum[i]
             const isOpen = open === key
@@ -165,27 +173,12 @@ function DayDetail({ f, dayIndex }: { f: Forecast; dayIndex: number }) {
   const c = useChartColors()
   const d = f.daily
   const start = d.time[dayIndex]
-  const end = start + DAY + 3_600_000 // hodina navíc kvůli dnům s 25 hodinami
-  const h = f.hourly
-  const idx = h.time.map((t, i) => [t, i] as const).filter(([t]) => t >= start && t <= Math.min(end, d.time[dayIndex + 1] ?? end))
-  const option: EChartsOption = useMemo(
-    () => ({
-      ...baseOption(c),
-      grid: { left: 4, right: 4, top: 20, bottom: 4, outerBoundsMode: 'same', outerBoundsContain: 'axisLabel' },
-      xAxis: { type: 'time', ...axisStyle(c), splitLine: { show: false }, axisLabel: { color: c.muted, fontSize: 10, formatter: (v: number) => formatTime(v) } },
-      yAxis: [
-        { type: 'value', scale: true, ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 10, formatter: '{value}°' } },
-        { type: 'value', min: 0, max: (v: { max: number }) => Math.max(2, v.max * 1.2), ...axisStyle(c), splitLine: { show: false }, axisLabel: { show: false } },
-      ],
-      tooltip: { ...(baseOption(c).tooltip as object), valueFormatter: (v) => (typeof v === 'number' ? num(v, 1) : String(v)) },
-      series: [
-        { name: 'Teplota °C', type: 'line', smooth: true, showSymbol: false, data: idx.map(([t, i]) => [t, h.temperature_2m[i]]), lineStyle: { color: c.warm, width: 2 }, itemStyle: { color: c.warm } },
-        { name: 'Pocitová °C', type: 'line', smooth: true, showSymbol: false, data: idx.map(([t, i]) => [t, h.apparent_temperature[i]]), lineStyle: { color: c.warm, width: 1, type: 'dashed', opacity: 0.6 }, itemStyle: { color: c.warm } },
-        { name: 'Srážky mm', type: 'bar', yAxisIndex: 1, data: idx.map(([t, i]) => [t - 1_800_000, h.precipitation[i]]), itemStyle: { color: c.rain, borderRadius: [3, 3, 0, 0] }, barMaxWidth: 8 },
-      ],
-    }),
-    [c, idx, h],
-  )
+  // Celý den po hodinách; dnešek nalevo od „teď“ naměřený (ČHMÚ), pak předpověď napojená na měření –
+  // stejný graf i odečet jako na stránce Dnes, teploty souhlasí s hodinovou předpovědí i s max/min dne
+  const end = d.time[dayIndex + 1] ?? start + DAY
+  const now = useNow(60_000)
+  const st = useStationNow()
+  const tl = useMemo(() => buildTimeline(st.data?.series, f.hourly, now, { from: start, to: end }), [st.data, f.hourly, now, start, end])
   const rows: [string, string][] = [
     ['Stav', wmoLabel(dayCode(f, dayIndex))],
     ['Pocitová teplota', `${tempShort(d.apparent_temperature_min[dayIndex])} až ${tempShort(d.apparent_temperature_max[dayIndex])}`],
@@ -199,7 +192,7 @@ function DayDetail({ f, dayIndex }: { f: Forecast; dayIndex: number }) {
   return (
     <div className="px-2 pb-3">
       <p className="mb-1 text-xs font-medium text-muted capitalize">{formatWeekdayLong(start)} {formatDayMonth(start)}</p>
-      {idx.length > 1 && <EChart option={option} height={150} />}
+      <TimelineChart tl={tl} c={c} label={`Teplota a srážky po hodinách – ${formatWeekdayLong(start)} ${formatDayMonth(start)}`} />
       <dl className="mt-2 grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 text-sm">
         {rows.map(([k, v]) => (
           <div key={k} className="contents">

@@ -57,7 +57,7 @@ function path(points: [number, number | null][], x: (t: number) => number, y: (v
 
 const srcWord = (s: TimelineHour['tempSrc']) => (s === 'measured' ? 'naměřeno' : s === 'forecast' ? 'předpověď' : '')
 
-export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
+export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledních 24 hodin a předpověď na 24 hodin' }: { tl: Timeline; c: ChartColors; label?: string }) {
   const [ref, W] = useWidth()
   const [sel, setSel] = useState<number | null>(null)
   const { from, to, now, hours } = tl
@@ -85,6 +85,9 @@ export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
   // Teplota i srážky ze stejného zdroje → jeden štítek v prvním řádku, jinak u každé hodnoty zvlášť
   const same = !s || !s.tempSrc || !s.mmSrc || s.tempSrc === s.mmSrc
   const nowX = x(now)
+  // „Teď“ jen když leží v grafu (detail zítřka apod. je celý předpověď)
+  const nowIn = now >= from && now <= to
+  const hasMeasured = tl.measured.some(([, v]) => v != null)
 
   return (
     <div>
@@ -116,7 +119,9 @@ export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
             <div className="text-faint">
               {tl.offset != null && Math.abs(tl.offset) >= 0.3
                 ? `Předpověď navazuje na měření (model se liší o ${num(Math.abs(tl.offset), 1)} °C, rozdíl do 6 h vymizí)`
-                : 'Vlevo od „teď“ měření, vpravo předpověď'}
+                : hasMeasured
+                  ? 'Vlevo od „teď“ měření, vpravo předpověď'
+                  : 'Předpověď po hodinách'}
             </div>
           </>
         )}
@@ -128,9 +133,9 @@ export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
         onPointerMove={(e) => (e.pointerType === 'mouse' || e.buttons) && pick(e)}
         onPointerLeave={(e) => e.pointerType === 'mouse' && setSel(null)}
       >
-        <svg width={W} height={HEIGHT} role="img" aria-label="Teplota a srážky za posledních 24 hodin a předpověď na 24 hodin" className="block">
+        <svg width={W} height={HEIGHT} role="img" aria-label={label} className="block">
           {/* Oblast předpovědi */}
-          <rect x={nowX} y={TOP - 4} width={Math.max(0, x(to) - nowX)} height={STRIP_Y + STRIP_H - TOP + 4} fill={c.text} opacity={0.04} />
+          {nowIn && <rect x={nowX} y={TOP - 4} width={Math.max(0, x(to) - nowX)} height={STRIP_Y + STRIP_H - TOP + 4} fill={c.text} opacity={0.04} />}
           {/* Mřížka a popisky teploty */}
           {tempTicks(tMin, tMax).map((v) => (
             <g key={v}>
@@ -180,13 +185,17 @@ export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
           <path d={path(tl.measured, x, y)} fill="none" stroke={c.warm} strokeWidth={2} strokeLinejoin="round" />
           <path d={path(tl.forecast, x, y)} fill="none" stroke={c.warm} strokeWidth={2} strokeDasharray="5 4" strokeLinejoin="round" opacity={0.9} />
           {/* Teď */}
-          <line x1={nowX} x2={nowX} y1={TOP - 4} y2={STRIP_Y + STRIP_H} stroke={c.text} strokeOpacity={0.5} />
-          <text x={nowX} y={STRIP_Y + STRIP_H + 10} textAnchor="middle" fontSize={9} fontWeight={600} fill={c.text}>
-            teď
-          </text>
+          {nowIn && (
+            <>
+              <line x1={nowX} x2={nowX} y1={TOP - 4} y2={STRIP_Y + STRIP_H} stroke={c.text} strokeOpacity={0.5} />
+              <text x={nowX} y={STRIP_Y + STRIP_H + 10} textAnchor="middle" fontSize={9} fontWeight={600} fill={c.text}>
+                teď
+              </text>
+            </>
+          )}
           {/* Časová osa */}
           {labels.map((h) =>
-            Math.abs(x(h.t) - nowX) > 16 ? (
+            !nowIn || Math.abs(x(h.t) - nowX) > 16 ? (
               <text key={h.t} x={x(h.t)} y={LABEL_Y} textAnchor="middle" fontSize={10} fill={c.muted}>
                 {formatTime(h.t)}
               </text>
@@ -212,12 +221,14 @@ export function TimelineChart({ tl, c }: { tl: Timeline; c: ChartColors }) {
         </svg>
       </div>
       <div className="mt-1 flex flex-wrap gap-x-3 gap-y-0.5 text-[10px] text-muted">
-        <span className="flex items-center gap-1">
-          <svg width="16" height="6" aria-hidden="true">
-            <line x1="0" x2="16" y1="3" y2="3" stroke={c.warm} strokeWidth="2" />
-          </svg>
-          naměřeno
-        </span>
+        {hasMeasured && (
+          <span className="flex items-center gap-1">
+            <svg width="16" height="6" aria-hidden="true">
+              <line x1="0" x2="16" y1="3" y2="3" stroke={c.warm} strokeWidth="2" />
+            </svg>
+            naměřeno
+          </span>
+        )}
         <span className="flex items-center gap-1">
           <svg width="16" height="6" aria-hidden="true">
             <line x1="0" x2="16" y1="3" y2="3" stroke={c.warm} strokeWidth="2" strokeDasharray="4 3" />

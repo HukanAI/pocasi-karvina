@@ -5,7 +5,7 @@ import { num, tempShort } from '../../lib/format.ts'
 import { nowcastQuarters, nowcastSummary } from '../../lib/rain.ts'
 import { formatTime, formatWeekdayShort, localDateKey } from '../../lib/time.ts'
 import { effectiveCode, wmoIcon, wmoLabel } from '../../lib/wmo.ts'
-import { useCurrentWeather, useNow, useNowTemp } from '../../state/derived.ts'
+import { useCurrentWeather, useHourlyTemps, useNow, useNowTemp } from '../../state/derived.ts'
 import { useForecast } from '../../state/queries.ts'
 import { PrecipBars } from '../PrecipBars.tsx'
 import { Card, ErrorCard, LoadingCard, StaleNote } from '../ui.tsx'
@@ -24,6 +24,8 @@ export function HourlyStrip() {
   const f = useForecast()
   const cw = useCurrentWeather(now)
   const nowTemp = useNowTemp(now)
+  // Teplota napojená na měření (prvních ~6 h), stejná jako v grafu naměřeno → předpověď
+  const temps = useHourlyTemps()
   if (f.isError && !f.data) return <ErrorCard title="Hodinová předpověď" error={f.error} onRetry={() => f.refetch()} />
   if (!f.data) return <LoadingCard title="Hodinová předpověď" />
   const h = f.data.hourly
@@ -48,7 +50,7 @@ export function HourlyStrip() {
             <div key={t} className={`flex min-w-[54px] flex-col items-center gap-0.5 rounded-2xl px-1 py-2 ${k === 0 ? 'bg-white/35 dark:bg-white/10' : ''}`}>
               <div className={`text-[11px] font-semibold ${k === 0 || newDay ? '' : 'text-muted'}`}>{k === 0 ? 'Teď' : newDay ? formatWeekdayShort(t) : formatTime(t).slice(0, 2)}</div>
               <WeatherIcon name={wmoIcon(code(i), k === 0 && cw ? cw.isDay : h.is_day[i] === 1)} size={38} alt={wmoLabel(code(i))} />
-              <div className="tabular text-base font-semibold">{tempShort(k === 0 ? nowTemp : h.temperature_2m[i])}</div>
+              <div className="tabular text-base font-semibold">{tempShort(k === 0 ? nowTemp : (temps?.[i] ?? h.temperature_2m[i]))}</div>
               {showRain && (
                 <div className="tabular flex h-4 items-center gap-0.5 text-[10px] font-medium text-[var(--rain)]">
                   {p != null && p >= 10 && (

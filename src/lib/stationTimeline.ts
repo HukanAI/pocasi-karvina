@@ -53,11 +53,53 @@ export interface HourlyForecast {
 export interface TimelineOptions {
   back?: number
   ahead?: number
+  /** Pevný rozsah (celé hodiny) místo back/ahead – např. jeden den v detailu předpovědi */
+  from?: number
+  to?: number
   /** Za jak dlouho se rozdíl model/měření úplně vytratí (ms) */
   blend?: number
 }
 
 const round1 = (v: number) => Math.round(v * 10) / 10
+
+/** Za jak dlouho se rozdíl mezi modelem a posledním měřením úplně vytratí */
+export const TEMP_BLEND_MS = 6 * HOUR
+
+/** Poslední naměřená teplota v 10min řadě stanice (do času `upTo`) */
+export function lastTempObs(st: Pick<StationSeries, 'start' | 'step' | 'T'> | null | undefined, upTo = Infinity): { t: number; T: number } | null {
+  if (!st) return null
+  for (let i = st.T.length - 1; i >= 0; i--) {
+    const t = st.start + i * st.step
+    const v = st.T[i]
+    if (v != null && t <= upTo) return { t, T: v }
+  }
+  return null
+}
+
+/**
+ * Hodinová teplota modelu napojená na poslední měření: v čase měření se model posune na naměřenou
+ * hodnotu a posun lineárně slábne do nuly za `blend`. Hodiny do měření (a bez měření) zůstávají beze změny.
+ * Stejná funkce se používá ve všech kartách, aby teploty v aplikaci souhlasily.
+ */
+export function blendTemps(
+  time: number[],
+  temps: (number | null)[],
+  anchor: { t: number; T: number } | null,
+  blend: number = TEMP_BLEND_MS,
+): { temps: (number | null)[]; offset: number | null } {
+  const m0 = anchor ? interpHourly(time, temps, anchor.t) : null
+  if (!anchor || m0 == null) return { temps, offset: null }
+  const offset = anchor.T - m0
+  return {
+    offset,
+    temps: temps.map((v, i) => {
+      const t = time[i]
+      if (v == null || t <= anchor.t) return v
+      const w = Math.max(0, 1 - (t - anchor.t) / blend)
+      return w > 0 ? round1(v + offset * w) : v
+    }),
+  }
+}
 
 /** Hodnota hodinové řady v čase t (lineární interpolace), null mimo rozsah nebo u chybějících hodnot */
 export function interpHourly(time: number[], values: (number | null)[], t: number): number | null {
@@ -78,22 +120,19 @@ export function interpHourly(time: number[], values: (number | null)[], t: numbe
 }
 
 export function buildTimeline(st: StationSeries | null | undefined, fc: HourlyForecast | null | undefined, now: number, opts: TimelineOptions = {}): Timeline {
-  const { back = 24 * HOUR, ahead = 24 * HOUR, blend = 6 * HOUR } = opts
+  const { back = 24 * HOUR, ahead = 24 * HOUR, blend = TEMP_BLEND_MS } = opts
   const nowHour = Math.floor(now / HOUR) * HOUR
-  const from = nowHour - back
-  const to = nowHour + ahead
+  const from = opts.from ?? nowHour - back
+  const to = opts.to ?? nowHour + ahead
 
   // Naměřené hodnoty podle času
   const T = new Map<number, number | null>()
   const SRA = new Map<number, number | null>()
   let lastSra: number | null = null
-  let lastObs: number | null = null
+  const anchor = lastTempObs(st, now)
+  const lastObs = anchor?.t ?? null
   if (st) {
-    st.T.forEach((v, i) => {
-      const t = st.start + i * st.step
-      T.set(t, v)
-      if (v != null && t <= now && (lastObs == null || t > lastObs)) lastObs = t
-    })
+    st.T.forEach((v, i) => T.set(st.start + i * st.step, v))
     st.SRA.forEach((v, i) => {
       const t = st.start + i * st.step
       SRA.set(t, v)
@@ -103,17 +142,12 @@ export function buildTimeline(st: StationSeries | null | undefined, fc: HourlyFo
   const step = st?.step ?? 10 * MINUTE
 
   const model = (t: number) => (fc ? interpHourly(fc.time, fc.temperature_2m, t) : null)
-  const obsT = lastObs != null ? (T.get(lastObs) ?? null) : null
-  const m0 = lastObs != null ? model(lastObs) : null
-  const offset = obsT != null && m0 != null ? obsT - m0 : null
-  // Předpověď napojená na měření: rozdíl v čase měření se lineárně vytrácí během `blend`
-  const blended = (t: number): number | null => {
-    const m = model(t)
-    if (m == null) return null
-    if (offset == null || lastObs == null) return m
-    const w = Math.max(0, 1 - (t - lastObs) / blend)
-    return m + offset * w
-  }
+  const obsT = anchor?.T ?? null
+  // Předpověď napojená na měření – stejný výpočet jako hodinová předpověď a max/min dneška
+  const bl = fc ? blendTemps(fc.time, fc.temperature_2m, anchor, blend) : null
+  const offset = bl?.offset ?? null
+  // Používá se jen v celých hodinách, kde se hodnota bere přímo z řady
+  const blended = (t: number): number | null => (fc && bl ? interpHourly(fc.time, bl.temps, t) : null)
 
   // Srážky za hodinu t → t+1h z 10min dat (značky t+10 … t+60 min); jen když hodina celá proběhla
   const measuredMm = (t: number): number | null => {
@@ -146,7 +180,7 @@ export function buildTimeline(st: StationSeries | null | undefined, fc: HourlyFo
     } else {
       const v = blended(t)
       if (v != null) {
-        temp = round1(v)
+        temp = v
         tempSrc = 'forecast'
         modelTemp = model(t)
       }
@@ -182,7 +216,7 @@ export function buildTimeline(st: StationSeries | null | undefined, fc: HourlyFo
   if (lastObs != null && obsT != null && lastObs >= from) forecast.push([lastObs, obsT])
   for (let t = Math.floor(fStart / HOUR) * HOUR + HOUR; t <= to; t += HOUR) {
     const v = blended(t)
-    if (v != null) forecast.push([t, round1(v)])
+    if (v != null) forecast.push([t, v])
   }
   return { from, to, now, lastObs, hours, measured, forecast, offset: offset == null ? null : round1(offset) }
 }
