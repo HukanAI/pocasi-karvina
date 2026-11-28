@@ -150,11 +150,21 @@ export function evaluateAlerts({ now, forecast: f, air, warnings = [] }: AlertIn
     })
   }
 
-  // Silný déšť: denní úhrn dnes a zítra
+  // Vydatné sněžení: nový sníh za den dnes a zítra (20 mm srážek by bylo až ~14 cm sněhu – to je pozdě)
+  const snowDays = new Set<string>()
+  for (const date of [today, tomorrow]) {
+    const a = snowDayAlert(f, date, date === today ? 'Dnes' : 'Zítra')
+    if (a) {
+      out.push(a)
+      snowDays.add(date)
+    }
+  }
+
+  // Silný déšť: denní úhrn dnes a zítra (pokud ten den nepřišlo upozornění na sníh – to déšť zmíní)
   for (const date of [today, tomorrow]) {
     const i = f.daily.time.findIndex((t) => localDateKey(t) === date)
     const sum = i >= 0 ? f.daily.precipitation_sum[i] : null
-    if (sum != null && sum >= R.dailyRainAtLeast) {
+    if (sum != null && sum >= R.dailyRainAtLeast && !snowDays.has(date)) {
       const sn = f.daily.snowfall_sum?.[i]
       const phase = precipPhase(sum, sn)
       const day = date === today ? 'Dnes' : 'Zítra'
@@ -300,6 +310,40 @@ export function rainSoonAlert(i: RainSoonInput): Alert | null {
       (byRadar ? 'Podle nowcastingu ČHMÚ (posun srážek, které zachytil radar).' : 'Podle modelu ICON-D2; radar srážky v okolí už zachytil.'),
     priority: 3,
     tags: [snow ? 'snowflake' : 'umbrella'],
+  }
+}
+
+/**
+ * Vydatné sněžení za den: kolik nového sněhu, kdy hlavně sněží (hodiny s ≥ 0,1 cm) a nejsilnější hodina.
+ * Den = místní kalendářní den (denní snowfall_sum Open-Meteo).
+ */
+export function snowDayAlert(f: AlertForecast, date: string, dayWord: string): Alert | null {
+  const i = f.daily.time.findIndex((t) => localDateKey(t) === date)
+  const snow = i >= 0 ? (f.daily.snowfall_sum?.[i] ?? null) : null
+  if (snow == null || snow < R.snowDayAtLeastCm) return null
+  // Hodinová hodnota v čase t platí za hodinu t − 1 h → t; hodina patří dni, ve kterém začíná
+  const hours = f.hourly.time
+    .map((t, k) => ({ start: t - HOUR, cm: f.hourly.snowfall?.[k] ?? 0 }))
+    .filter((h) => localDateKey(h.start) === date && h.cm >= 0.1)
+  let when = ''
+  let peak = ''
+  if (hours.length) {
+    const from = localParts(hours[0].start).hour
+    const to = localParts(hours[hours.length - 1].start).hour + 1
+    when = from === 0 && to === 24 ? ', sněžit má po celý den' : `, sněžit má hlavně od ${from} do ${to} h`
+    const max = Math.max(...hours.map((h) => h.cm))
+    if (max >= 1) peak = ` (nejvíc ${num(max, 1)} cm za hodinu)`
+  }
+  const sum = f.daily.precipitation_sum[i]
+  const rain = precipPhase(sum, snow) === 'mixed' ? ` Zčásti bude pršet, celkem ${num(sum, 0)} mm srážek.` : ''
+  return {
+    key: `snowday:${date}`,
+    title: 'Vydatné sněžení',
+    message:
+      `${dayWord} napadne kolem ${num(snow, 0)} cm nového sněhu${when}${peak}. ` +
+      `Pravděpodobnost srážek ${num(f.daily.precipitation_probability_max[i], 0)} %.${rain} Počítejte se sněhem na silnicích a chodnících.`,
+    priority: snow >= R.snowDayHighCm ? 4 : 3,
+    tags: ['snowflake'],
   }
 }
 

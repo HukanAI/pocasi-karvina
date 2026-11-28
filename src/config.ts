@@ -68,6 +68,10 @@ export const ALERT_RULES = {
   dailyRainAtLeast: 20,
   /** Hodinový úhrn srážek (mm), větší nebo rovno */
   hourlyRainAtLeast: 10,
+  /** Vydatné sněžení: nový sníh za den (cm), větší nebo rovno */
+  snowDayAtLeastCm: 5,
+  /** Od tohoto množství nového sněhu za den má upozornění vysokou prioritu (cm) */
+  snowDayHighCm: 10,
   /** Nárazy větru (km/h), větší nebo rovno */
   gustAtLeast: 60,
   /** Denní průměr PM10 (µg/m³), ostře větší (denní imisní limit ČR/EU je 50) */

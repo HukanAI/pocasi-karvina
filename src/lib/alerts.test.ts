@@ -247,22 +247,65 @@ describe('brzy začne pršet', () => {
 })
 
 describe('sníh v upozorněních', () => {
-  it('vydatné sněžení: cm nového sněhu místo mm', () => {
+  it('vydatné sněžení nahradí upozornění na vydatné srážky téhož dne', () => {
     const f = fc(undefined, { sum: 21 })
     f.daily.snowfall_sum = f.daily.time.map(() => 14.7)
-    const a = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'rainday:2026-10-29')!
+    const all = evaluateAlerts({ now: NOW, forecast: f })
+    const a = all.find((x) => x.key === 'snowday:2026-10-29')!
     expect(a.title).toBe('Vydatné sněžení')
-    expect(a.message).toBe('Dnes napadne kolem 15 cm nového sněhu (pravděpodobnost 50 %).')
+    expect(a.message).toBe('Dnes napadne kolem 15 cm nového sněhu. Pravděpodobnost srážek 50 %. Počítejte se sněhem na silnicích a chodnících.')
     expect(a.tags).toEqual(['snowflake'])
+    expect(a.priority).toBe(4) // od 10 cm
+    expect(all.some((x) => x.key.startsWith('rainday:'))).toBe(false)
   })
 
-  it('vydatné srážky dál v mm, déšť se sněhem s podílem sněhu', () => {
+  it('vydatné srážky dál v mm, déšť se sněhem pod 5 cm s podílem sněhu', () => {
     const rain = evaluateAlerts({ now: NOW, forecast: fc(undefined, { sum: 21 }) }).find((x) => x.key === 'rainday:2026-10-29')!
     expect(rain.message).toBe('Dnes spadne kolem 21 mm srážek (pravděpodobnost 50 %).')
     const f = fc(undefined, { sum: 21 })
-    f.daily.snowfall_sum = f.daily.time.map(() => 7)
+    f.daily.snowfall_sum = f.daily.time.map(() => 3)
     const mixed = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'rainday:2026-10-29')!
-    expect(mixed.message).toBe('Dnes spadne kolem 21 mm srážek, z toho asi 7 cm sněhu (pravděpodobnost 50 %).')
+    expect(mixed.message).toBe('Dnes spadne kolem 21 mm srážek, z toho asi 3 cm sněhu (pravděpodobnost 50 %).')
+  })
+
+  it('práh 5 cm nového sněhu (4,9 ne), priorita 3 pod 10 cm', () => {
+    const withSnow = (cm: number, sum: number) => {
+      const f = fc(undefined, { sum })
+      f.daily.snowfall_sum = f.daily.time.map(() => cm)
+      return evaluateAlerts({ now: NOW, forecast: f })
+    }
+    const five = withSnow(5, 7.2).find((x) => x.key === 'snowday:2026-10-29')!
+    expect(five.priority).toBe(3)
+    expect(withSnow(4.9, 7).some((x) => x.key.startsWith('snowday:'))).toBe(false)
+    // Zítra také
+    expect(withSnow(6, 8.6).map((x) => x.key)).toEqual(expect.arrayContaining(['snowday:2026-10-29', 'snowday:2026-10-30']))
+  })
+
+  it('déšť se sněhem nad 5 cm: upozornění na sníh zmíní i déšť', () => {
+    const f = fc(undefined, { sum: 21 })
+    f.daily.snowfall_sum = f.daily.time.map(() => 7)
+    const a = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'snowday:2026-10-29')!
+    expect(a.message).toContain('Zčásti bude pršet, celkem 21 mm srážek.')
+  })
+
+  it('skutečné sněžení 26. 11. 2026: kdy a nejsilnější hodina', () => {
+    // Open-Meteo pro Karvinou, hodinové hodnoty platí za předchozí hodinu (15:00 = 14–15 h)
+    const cm: Record<number, number> = { 15: 0.07, 16: 0.35, 17: 1.05, 18: 1.19, 19: 1.68, 20: 2.66, 21: 2.59, 22: 1.26, 23: 0.7 }
+    const f = fc((t) => {
+      const h = (t - at('2026-10-29', 0)) / HOUR
+      return h >= 15 && h <= 23 ? { precip: cm[h] / 0.7, temp: -0.5 } : {}
+    })
+    f.hourly.snowfall = f.hourly.time.map((t) => cm[(t - at('2026-10-29', 0)) / HOUR] ?? 0)
+    // 27. 11. 0:00 (hodina 23–24) patří ještě 26. 11.
+    f.hourly.snowfall[f.hourly.time.indexOf(at('2026-10-30', 0))] = 0.35
+    f.daily.snowfall_sum = f.daily.time.map((_, k) => (k === 1 ? 11.55 : 0))
+    f.daily.precipitation_sum = f.daily.time.map((_, k) => (k === 1 ? 16.5 : 0))
+    const a = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'snowday:2026-10-29')!
+    // Hodina 14–15 h má jen 0,07 cm (pod 0,1 cm) → sněžení se počítá od 15 h
+    expect(a.message).toBe(
+      'Dnes napadne kolem 12 cm nového sněhu, sněžit má hlavně od 15 do 24 h (nejvíc 2,7 cm za hodinu). Pravděpodobnost srážek 50 %. Počítejte se sněhem na silnicích a chodnících.',
+    )
+    expect(a.priority).toBe(4)
   })
 
   it('velmi silné sněžení za hodinu', () => {

@@ -12,7 +12,7 @@ Běží zdarma na GitHub Pages a dá se nainstalovat na plochu telefonu (Android
 - **Radar** (ve stylu Windy, jedna časová osa): radar ČHMÚ za poslední 2 h (1 km, po 5 min) → nowcasting ČHMÚ na 1 h → model ČHMÚ ALADIN na 24 h (2,3 km, celá střední Evropa)
 - **Ovzduší**: index EAQI, PM10, PM2,5, NO₂, O₃, SO₂, CO, denní průměry vs. limity, pyl
 - **Historie**: srážky po dnech za libovolný měsíc od roku 1877 (průběžně doplňované z 10min měření ČHMÚ, den 7–7 h SEČ jako u ČHMÚ), normál 1991–2020, rekordy dne, tento den v minulých letech (od 1877), letošní rok po měsících, kumulativní srážky, charakteristické dny, klimatický trend a „warming stripes“, suchá období, srovnání libovolných dvou let. Zdroj lze přepnout mezi měřením ČHMÚ a reanalýzou ERA5.
-- **Upozornění do telefonu** (přes aplikaci ntfy): **brzy začne pršet** (20–60 min předem z nowcastingu ČHMÚ, záložně model ICON-D2 potvrzený radarem; jen 6–22 h, nejvýš jednou za 3 h, ne během deště), mráz, náledí, bouřky, přívalový déšť, vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30
+- **Upozornění do telefonu** (přes aplikaci ntfy): **brzy začne pršet** (20–60 min předem z nowcastingu ČHMÚ, záložně model ICON-D2 potvrzený radarem; jen 6–22 h, nejvýš jednou za 3 h, ne během deště), mráz, náledí, bouřky, přívalový déšť, **vydatné sněžení** (od 5 cm nového sněhu za den, dnes nebo zítra; s časem a nejsilnější hodinou), vítr, prudké ochlazení, smog, výstrahy ČHMÚ a ranní souhrn v 6:30
 
 ## Zdroje dat
 
