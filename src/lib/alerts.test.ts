@@ -236,10 +236,40 @@ describe('brzy začne pršet', () => {
     const s = rainSoonAlert(input({ nowcastHere: nowcast(25), tempC: 0 }))
     expect(s?.title).toBe('Brzy začne sněžit')
     expect(s?.tags).toEqual(['snowflake'])
+    // Intenzita sněžení a cm sněhu za hodinu (ne „srážky … mm/h“)
+    expect(s?.message).toMatch(/začne v Karviné sněžit – (slabé|mírné|silné|velmi silné) sněžení \(asi [\d,]+ cm sněhu za hodinu\)/)
   })
   it('lastSentAt najde poslední odeslání podle začátku klíče', () => {
     const st = { sent: { 'rainsoon:a': '2026-10-29T08:00:00.000Z', 'rainsoon:b': '2026-10-29T09:00:00.000Z', 'storm:x': '2026-10-29T10:00:00.000Z' } }
     expect(lastSentAt(st, 'rainsoon:')).toBe(Date.parse('2026-10-29T09:00:00.000Z'))
     expect(lastSentAt({ sent: {} }, 'rainsoon:')).toBeNull()
+  })
+})
+
+describe('sníh v upozorněních', () => {
+  it('vydatné sněžení: cm nového sněhu místo mm', () => {
+    const f = fc(undefined, { sum: 21 })
+    f.daily.snowfall_sum = f.daily.time.map(() => 14.7)
+    const a = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'rainday:2026-10-29')!
+    expect(a.title).toBe('Vydatné sněžení')
+    expect(a.message).toBe('Dnes napadne kolem 15 cm nového sněhu (pravděpodobnost 50 %).')
+    expect(a.tags).toEqual(['snowflake'])
+  })
+
+  it('vydatné srážky dál v mm, déšť se sněhem s podílem sněhu', () => {
+    const rain = evaluateAlerts({ now: NOW, forecast: fc(undefined, { sum: 21 }) }).find((x) => x.key === 'rainday:2026-10-29')!
+    expect(rain.message).toBe('Dnes spadne kolem 21 mm srážek (pravděpodobnost 50 %).')
+    const f = fc(undefined, { sum: 21 })
+    f.daily.snowfall_sum = f.daily.time.map(() => 7)
+    const mixed = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key === 'rainday:2026-10-29')!
+    expect(mixed.message).toBe('Dnes spadne kolem 21 mm srážek, z toho asi 7 cm sněhu (pravděpodobnost 50 %).')
+  })
+
+  it('velmi silné sněžení za hodinu', () => {
+    const f = fc((t) => (t === at('2026-10-29', 22) ? { precip: 12 } : {}))
+    f.hourly.snowfall = f.hourly.time.map((t) => (t === at('2026-10-29', 22) ? 8.4 : 0))
+    const a = evaluateAlerts({ now: NOW, forecast: f }).find((x) => x.key.startsWith('rainhour:'))!
+    expect(a.title).toBe('Velmi silné sněžení')
+    expect(a.message).toContain('až 8,4 cm sněhu (12,0 mm vody) za hodinu')
   })
 })

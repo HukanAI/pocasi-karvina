@@ -3,8 +3,9 @@
 import { CHMI_STATION } from '../../config.ts'
 import { mm, num } from '../../lib/format.ts'
 import type { HourChance, NowcastSummary } from '../../lib/rain.ts'
+import { formatPrecip, isSnowCode, type PrecipPhase, precipPhase, SNOW_CM_PER_MM } from '../../lib/snow.ts'
 import { DAY, formatAgo, formatDayPhrase, formatDuration, formatMoment, formatTime, HOUR, MINUTE } from '../../lib/time.ts'
-import { useNow, useRain } from '../../state/derived.ts'
+import { useCurrentWeather, useNow, useRain } from '../../state/derived.ts'
 import { Card, LoadingCard, SourceNote } from '../ui.tsx'
 import { WeatherIcon } from '../WeatherIcon.tsx'
 
@@ -34,28 +35,36 @@ const srcLabel = (src: 'station' | 'model') => (src === 'station' ? `měřeno Č
 export function RainCard() {
   // Stav deště (tisíce vzorků) stačí přepočítat jednou za minutu; sekundy tiká jen zobrazení
   const now = useNow(1000)
-  const rain = useRain(useNow(60_000))
+  const minute = useNow(60_000)
+  const rain = useRain(minute)
+  // Stanice měří jen vodu; zda právě sněží, určuje stejný stav jako nadpis (model + teplota stanice)
+  const cw = useCurrentWeather(minute)
   if (rain.isLoading && rain.state.kind === 'unknown') return <LoadingCard title="Bez deště" lines={2} />
   const { state, near, next, chance, expectedEnd, forecastReady } = rain
   const thresholdNote = rain.minTotal > 0.1 ? ` Počítají se jen deště s úhrnem aspoň ${num(rain.minTotal, 1)} mm (lze změnit v nastavení).` : ''
 
   if (state.kind === 'raining') {
+    const snowing = isSnowCode(cw?.code)
     return (
-      <Card title="Právě prší" action={<WeatherIcon name="raindrops" size={36} />}>
-        <p className="text-sm text-muted">Prší už</p>
+      <Card title={snowing ? 'Právě sněží' : 'Právě prší'} action={<WeatherIcon name={snowing ? 'snowflake' : 'raindrops'} size={36} />}>
+        <p className="text-sm text-muted">{snowing ? 'Sněží už' : 'Prší už'}</p>
         <Big ms={now - state.since} />
         <p className="mt-1 text-sm">
-          od {formatMoment(state.since, now)} · zatím <b>{mm(state.total)}</b>
+          od {formatMoment(state.since, now)} · zatím <b>{snowing ? formatPrecip(state.total, state.total * SNOW_CM_PER_MM, { approx: true }) : mm(state.total)}</b>
+          {snowing && <span className="text-muted"> ({mm(state.total)} vody)</span>}
         </p>
         {expectedEnd != null && (
           <p className="mt-1 text-sm text-muted">
-            {expectedEnd <= now + 15 * MINUTE ? 'Podle modelu by měl déšť brzy ustat.' : `Podle modelu skončí kolem ${formatTime(expectedEnd)}${expectedEnd - now > DAY ? ` (${formatMoment(expectedEnd, now)})` : ''}.`}
+            {expectedEnd <= now + 15 * MINUTE
+              ? `Podle modelu by ${snowing ? 'sněžení mělo' : 'měl déšť'} brzy ustat.`
+              : `Podle modelu ${snowing ? 'sněžení skončí' : 'skončí'} kolem ${formatTime(expectedEnd)}${expectedEnd - now > DAY ? ` (${formatMoment(expectedEnd, now)})` : ''}.`}
           </p>
         )}
         <SourceNote>
           {state.startSrc === state.src
             ? `Zdroj: ${srcLabel(state.src)}.`
-            : `Začátek deště: ${srcLabel(state.startSrc)}. Že stále prší: ${srcLabel(state.src)}.`}
+            : `Začátek ${snowing ? 'sněžení' : 'deště'}: ${srcLabel(state.startSrc)}. Že stále ${snowing ? 'sněží' : 'prší'}: ${srcLabel(state.src)}.`}
+          {snowing ? ' Srážkoměr měří vodu; výška sněhu je odhad (0,7 cm na 1 mm vody).' : ''}
           {rain.lastStationT ? ` Poslední měření ČHMÚ ${formatAgo(rain.lastStationT, now)}.` : ''}
           {thresholdNote}
         </SourceNote>
@@ -77,22 +86,31 @@ export function RainCard() {
   }
 
   const ev = state.lastEvent
+  const ph: PrecipPhase = rain.lastEventPhase ?? 'rain'
+  const evWord =
+    ph === 'snow'
+      ? { last: 'Naposledy sněžilo', what: 'Sněžení trvalo' }
+      : ph === 'mixed'
+        ? { last: 'Naposledy pršelo se sněhem', what: 'Déšť se sněhem trval' }
+        : { last: 'Naposledy pršelo', what: 'Déšť trval' }
   return (
     <Card title="Bez deště" action={<WeatherIcon name="umbrella" size={36} />}>
       <Big ms={now - state.since} />
       <p className="mt-1 text-sm">
-        Naposledy pršelo <b>{formatMoment(state.since, now)}</b>
+        {evWord.last} <b>{formatMoment(state.since, now)}</b>
       </p>
       <p className="text-xs text-muted">
-        Déšť trval {formatDuration(ev.end - ev.start)} a spadlo {mm(ev.total)}
+        {evWord.what} {formatDuration(ev.end - ev.start)} a spadlo {mm(ev.total)}
+        {ph === 'snow' ? ` vody (${formatPrecip(ev.total, ev.total * SNOW_CM_PER_MM, { approx: true })})` : ''}
         {ev.peakRate >= 1 ? ` (nejvíc ${num(ev.peakRate, 1)} mm/h)` : ''}.
       </p>
       {state.drizzleNow && <p className="mt-1 text-xs text-muted">Právě slabě mrholí, ale zatím pod nastaveným prahem.</p>}
       {forecastReady && <RainOutlook near={near} chance={chance} expected={next} now={now} />}
       {state.missingMs > HOUR && <p className="mt-1 text-xs text-amber-800 dark:text-amber-200">Pozor: od posledního deště chybí {formatDuration(state.missingMs)} měření.</p>}
       <SourceNote>
-        Konec deště: {srcLabel(ev.endSrc)}
-        {rain.lastStationT ? `, poslední měření ${formatAgo(rain.lastStationT, now)}` : ''}. Déšť = srážka ≥ 0,1 mm, přestávky do 30 min se slučují.
+        Konec {ph === 'snow' ? 'sněžení' : ph === 'mixed' ? 'srážek' : 'deště'}: {srcLabel(ev.endSrc)}
+        {rain.lastStationT ? `, poslední měření ${formatAgo(rain.lastStationT, now)}` : ''}. Déšť i sníh = srážka ≥ 0,1 mm vody, přestávky do 30 min se slučují.
+        {ph !== 'rain' ? ' Srážkoměr měří vodu; zda šlo o sníh, určuje model (0,7 cm sněhu na 1 mm vody).' : ''}
         {thresholdNote}
       </SourceNote>
     </Card>
@@ -101,16 +119,20 @@ export function RainCard() {
 
 type Expected = { at: number; mm: number; prob: number | null } | null
 
-/** Slovní vyjádření podle pravděpodobnosti */
-const chanceLabel = (prob: number | null, mm: number | null) =>
-  (prob ?? 0) >= 60 ? 'Déšť' : (prob ?? 0) >= 30 || (mm ?? 0) >= 0.5 ? 'Pravděpodobně déšť' : 'Možný slabý déšť'
+/** Slovní vyjádření podle pravděpodobnosti a skupenství */
+const chanceLabel = (prob: number | null, mm: number | null, phase: PrecipPhase) => {
+  const k = (prob ?? 0) >= 60 ? 0 : (prob ?? 0) >= 30 || (mm ?? 0) >= 0.5 ? 1 : 2
+  if (phase === 'snow') return ['Sněžení', 'Pravděpodobně sněžení', 'Možné slabé sněžení'][k]
+  if (phase === 'mixed') return ['Déšť se sněhem', 'Pravděpodobně déšť se sněhem', 'Možný slabý déšť se sněhem'][k]
+  return ['Déšť', 'Pravděpodobně déšť', 'Možný slabý déšť'][k]
+}
 
 /**
  * Kdy může zase pršet. Příští 2 hodiny rozhoduje výhled po 15 minutách (stejně jako karta „Srážky v příštích
  * 2 hodinách“), dál nejbližší hodina se šancí ≥ 10 % (stejně jako hodinová předpověď) a nakonec kdy model
  * čeká měřitelné srážky. Časy jsou vždy začátky intervalů.
  */
-function RainOutlook({ near, chance, expected, now }: { near: NowcastSummary | null; chance: HourChance | null; expected: Expected; now: number }) {
+function RainOutlook({ near, chance, expected, now }: { near: NowcastSummary | null; chance: (HourChance & { phase: PrecipPhase }) | null; expected: Expected; now: number }) {
   const day = (t: number) => formatDayPhrase(t, now)
   // Datum končí tečkou ('9. 11.'), za 'zítra' je potřeba ji doplnit
   const sentence = (s: string) => (s.endsWith('.') ? s : `${s}.`)
@@ -118,14 +140,15 @@ function RainOutlook({ near, chance, expected, now }: { near: NowcastSummary | n
   const nearDry = near?.kind === 'dry' ? <p className="mt-3 text-sm">Příští 2 hodiny bez srážek.</p> : null
   if (soonRain) {
     const at = soonRain.kind === 'starts' ? soonRain.at : now
+    const snow = precipPhase(soonRain.total, soonRain.snowTotal) === 'snow'
     return (
       <div className="mt-3 flex items-start gap-2 rounded-2xl bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
-        <WeatherIcon name="raindrop" size={26} className="mt-0.5" />
+        <WeatherIcon name={snow ? 'snowflake' : 'raindrop'} size={26} className="mt-0.5" />
         <div className="min-w-0">
           <div>
-            Srážky mohou začít <b>{at <= now ? 'už teď' : `kolem ${formatTime(at)}`}</b>
+            {snow ? 'Sněžení může' : 'Srážky mohou'} začít <b>{at <= now ? 'už teď' : `kolem ${formatTime(at)}`}</b>
           </div>
-          <div className="text-xs text-muted">do 2 hodin asi {num(soonRain.total, 1)} mm · výhled po 15 minutách (ICON-D2)</div>
+          <div className="text-xs text-muted">do 2 hodin asi {formatPrecip(soonRain.total, soonRain.snowTotal)} · výhled po 15 minutách (ICON-D2)</div>
         </div>
       </div>
     )
@@ -134,7 +157,7 @@ function RainOutlook({ near, chance, expected, now }: { near: NowcastSummary | n
     return (
       <>
         {nearDry}
-        <p className="mt-1 text-sm text-muted">V příštích 16 dnech se déšť podle předpovědi nečeká.</p>
+        <p className="mt-1 text-sm text-muted">V příštích 16 dnech se srážky podle předpovědi nečekají.</p>
       </>
     )
   }
@@ -147,15 +170,15 @@ function RainOutlook({ near, chance, expected, now }: { near: NowcastSummary | n
     <>
       {nearDry}
       <div className="mt-2 flex items-start gap-2 rounded-2xl bg-black/5 px-3 py-2 text-sm dark:bg-white/5">
-        <WeatherIcon name="raindrop" size={26} className="mt-0.5" />
+        <WeatherIcon name={chance.phase === 'snow' ? 'snowflake' : 'raindrop'} size={26} className="mt-0.5" />
         <div className="min-w-0">
           <div>
-            {chanceLabel(chance.prob, chance.mm)}:{' '}
+            {chanceLabel(chance.prob, chance.mm, chance.phase)}:{' '}
             <b>{far ? `nejdříve ${day(from)}` : from - now < HOUR ? `během příští hodiny` : formatMoment(from, now).replace(' v ', ' kolem ')}</b>
           </div>
           <div className="text-xs text-muted">
             {chance.prob != null ? `pravděpodobnost ${num(chance.prob, 0)} %` : ''}
-            {(chance.mm ?? 0) >= 0.1 ? ` · asi ${num(chance.mm, 1)} mm za hodinu` : ''}
+            {(chance.mm ?? 0) >= 0.1 ? ` · asi ${formatPrecip(chance.mm, chance.snowCm)} za hodinu` : ''}
             {far ? ' · výhled na více dní je nejistý' : ''}
           </div>
           {later && <div className="mt-1 text-xs text-faint">{sentence(`Měřitelné srážky (aspoň 0,1 mm) model čeká až ${day(later.at)}`)}</div>}

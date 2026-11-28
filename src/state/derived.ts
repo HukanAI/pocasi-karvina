@@ -7,6 +7,7 @@ import type { StationNow, StationSra10 } from '../lib/dataTypes.ts'
 import {
   expectedRainEnd,
   type ForecastPrecip,
+  type HourChance,
   mergeSamples,
   nextRain,
   nextRainChance,
@@ -15,6 +16,7 @@ import {
   type PrecipSample,
   rainState,
 } from '../lib/rain.ts'
+import { modelPhaseBetween, type PrecipPhase, precipPhase } from '../lib/snow.ts'
 import { blendTemps, lastTempObs } from '../lib/stationTimeline.ts'
 import { HOUR, localDateKey, MINUTE } from '../lib/time.ts'
 import { todayRange } from '../lib/todayRange.ts'
@@ -84,6 +86,29 @@ export function modelSamples(f: Forecast | undefined): ForecastPrecip[] {
   return out.sort((a, b) => a.t - b.t)
 }
 
+/** Skupenství srážek v minulém období: model, jinak průměrná teplota stanice (≤ 0,5 °C = sníh) */
+function eventPhase(f: Forecast | undefined, st: StationNow | undefined, from: number, to: number): PrecipPhase {
+  const m = f ? modelPhaseBetween(f.hourly, from, to) : null
+  if (m) return m
+  if (st) {
+    const T = st.series.T.filter((v, i) => {
+      const t = st.series.start + i * st.series.step
+      return v != null && t > from && t <= to
+    }) as number[]
+    if (T.length) return T.reduce((a, b) => a + b, 0) / T.length <= 0.5 ? 'snow' : 'rain'
+  }
+  return 'rain'
+}
+
+/** Šance na srážky + skupenství: podle množství, a když model žádné nečeká, podle teploty té hodiny */
+function withPhase(f: Forecast, h: HourChance | null): (HourChance & { phase: PrecipPhase }) | null {
+  if (!h) return null
+  if ((h.mm ?? 0) >= 0.1) return { ...h, phase: precipPhase(h.mm, h.snowCm) }
+  const i = f.hourly.time.indexOf(h.t)
+  const T = i >= 0 ? f.hourly.temperature_2m[i] : null
+  return { ...h, phase: T != null && T <= 0.5 ? 'snow' : 'rain' }
+}
+
 export function useRain(now: number) {
   const forecast = useForecast()
   const sra = useStationSra()
@@ -106,7 +131,7 @@ export function useRain(now: number) {
     const lastStationT = station.length ? station[station.length - 1].t : null
     const f = forecast.data
     // Příští 2 hodiny: stejný výpočet jako karta „Srážky v příštích 2 hodinách“
-    const near = f ? nowcastSummary(nowcastQuarters(f.minutely15.time, f.minutely15.precipitation, now)) : null
+    const near = f ? nowcastSummary(nowcastQuarters(f.minutely15.time, f.minutely15.precipitation, now, f.minutely15.snowfall)) : null
     return {
       state,
       near,
@@ -114,14 +139,19 @@ export function useRain(now: number) {
       // Šance na srážky stejně jako v hodinové předpovědi (pravděpodobnost ≥ 10 % nebo předpovězené množství);
       // hodiny pokryté výhledem na 2 h rozhoduje podrobnější předpověď po 15 minutách
       chance: f
-        ? nextRainChance(
-            f.hourly.time.map((t, i) => ({ t, prob: f.hourly.precipitation_probability[i], mm: f.hourly.precipitation[i] })),
-            now,
-            undefined,
-            near?.until ?? now,
+        ? withPhase(
+            f,
+            nextRainChance(
+              f.hourly.time.map((t, i) => ({ t, prob: f.hourly.precipitation_probability[i], mm: f.hourly.precipitation[i], snowCm: f.hourly.snowfall[i] })),
+              now,
+              undefined,
+              near?.until ?? now,
+            ),
           )
         : null,
       expectedEnd: state.kind === 'raining' ? expectedRainEnd(future, now) : null,
+      // Stanice měří jen vodu – zda poslední srážky byly sníh, odhadne model (a bez něj teplota stanice)
+      lastEventPhase: state.kind === 'dry' ? eventPhase(f, stNow.data, state.lastEvent.start, state.lastEvent.end) : null,
       lastStationT,
       // Bez předpovědi nelze říct, kdy bude pršet (nesmí se to plést s „déšť se nečeká“)
       forecastReady: !!f,

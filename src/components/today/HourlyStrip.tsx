@@ -3,6 +3,7 @@
 import { indexAtOrBefore } from '../../api/openMeteo.ts'
 import { num, tempShort } from '../../lib/format.ts'
 import { nowcastQuarters, nowcastSummary } from '../../lib/rain.ts'
+import { formatPrecip, precipPhase } from '../../lib/snow.ts'
 import { formatTime, formatWeekdayShort, localDateKey } from '../../lib/time.ts'
 import { effectiveCode, wmoIcon, wmoLabel } from '../../lib/wmo.ts'
 import { useCurrentWeather, useHourlyTemps, useNow, useNowTemp } from '../../state/derived.ts'
@@ -82,7 +83,7 @@ export function Nowcast() {
   const now = useNow(60_000)
   const f = useForecast()
   if (!f.data) return null
-  const q = nowcastQuarters(f.data.minutely15.time, f.data.minutely15.precipitation, now)
+  const q = nowcastQuarters(f.data.minutely15.time, f.data.minutely15.precipitation, now, f.data.minutely15.snowfall)
   const s = nowcastSummary(q)
   if (!s) return null
   if (s.kind === 'dry') {
@@ -96,18 +97,22 @@ export function Nowcast() {
       </section>
     )
   }
+  // Sníh se pojmenuje a počítá v cm nového sněhu, déšť (a déšť se sněhem) v mm
+  const snow = precipPhase(s.total, s.snowTotal) === 'snow'
   const summary =
     s.kind === 'ongoing'
       ? s.dryAt
-        ? `Srážky by měly ustat kolem ${formatTime(s.dryAt)}.`
-        : 'Srážky budou pokračovat i v příštích 2 hodinách.'
-      : `Srážky mohou začít kolem ${formatTime(s.at)}.`
+        ? `${snow ? 'Sněžení by mělo' : 'Srážky by měly'} ustat kolem ${formatTime(s.dryAt)}.`
+        : `${snow ? 'Sněžení bude' : 'Srážky budou'} pokračovat i v příštích 2 hodinách.`
+      : `${snow ? 'Sněžení může' : 'Srážky mohou'} začít kolem ${formatTime(s.at)}.`
   return (
     <Card title="Srážky v příštích 2 hodinách">
       <p className="text-sm font-medium">{summary}</p>
-      <p className="mb-2 text-xs text-muted">Celkem asi {num(s.total, 1)} mm za 2 hodiny</p>
+      <p className="mb-2 text-xs text-muted">Celkem asi {formatPrecip(s.total, s.snowTotal, { water: true })} za 2 hodiny</p>
       <PrecipBars bars={q} values />
-      <p className="mt-2 text-[11px] text-faint">Po 15 minutách, model ICON-D2. Výška sloupce = množství srážek za 15 minut.</p>
+      <p className="mt-2 text-[11px] text-faint">
+        Po 15 minutách, model ICON-D2. Výška sloupce = množství srážek (voda) za 15 minut{q.some((x) => x.snowCm) ? '; u sněhu číslo nad sloupcem = cm nového sněhu' : ''}.
+      </p>
     </Card>
   )
 }

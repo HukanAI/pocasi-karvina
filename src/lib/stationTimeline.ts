@@ -2,6 +2,7 @@
 // Vše leží na jedné hodinové mřížce, aby odečet prstem ukazoval teplotu i srážky vždy pro stejnou hodinu.
 // Konvence jako v hodinové předpovědi: hodina „14:00“ = teplota ve 14:00 a srážky za 14:00–15:00.
 
+import { precipPhase, SNOW_CM_PER_MM, snowShare } from './snow.ts'
 import { HOUR, MINUTE } from './time.ts'
 
 export type Src = 'measured' | 'forecast'
@@ -16,6 +17,11 @@ export interface TimelineHour {
   /** Srážky za hodinu t → t + 1 h (mm) */
   mm: number | null
   mmSrc: Src | null
+  /**
+   * Z toho nový sníh (cm). U předpovědi z modelu; u měření odhad – srážkoměr měří jen vodu, skupenství
+   * se vezme z modelu pro tutéž hodinu, a když model nesrážel, z teploty stanice (≤ 0,5 °C = sníh).
+   */
+  snowCm: number | null
   /** Pravděpodobnost srážek v hodině t → t + 1 h (%), jen předpověď */
   prob: number | null
 }
@@ -48,6 +54,8 @@ export interface HourlyForecast {
   /** Open-Meteo: srážky za hodinu PŘEDCHÁZEJÍCÍ času time[i] */
   precipitation: (number | null)[]
   precipitation_probability: (number | null)[]
+  /** Nový sníh za hodinu PŘEDCHÁZEJÍCÍ času time[i] (cm) */
+  snowfall?: (number | null)[]
 }
 
 export interface TimelineOptions {
@@ -188,20 +196,35 @@ export function buildTimeline(st: StationSeries | null | undefined, fc: HourlyFo
     let mm: number | null = measuredMm(t)
     let mmSrc: Src | null = mm != null ? 'measured' : null
     let prob: number | null = null
+    let snowCm: number | null = null
+    // Open-Meteo: hodnota v čase t+1h je za hodinu t → t+1h
+    const fi = fcIndex.get(t + HOUR)
     if (mm == null) {
-      // Open-Meteo: hodnota v čase t+1h je za hodinu t → t+1h
-      const i = fcIndex.get(t + HOUR)
       // Předpověď jen pro hodiny, které ještě nejsou změřené (ne pro staré výpadky stanice)
-      if (i != null && fc && (lastSra == null || t + HOUR > lastSra)) {
-        const v = fc.precipitation[i]
+      if (fi != null && fc && (lastSra == null || t + HOUR > lastSra)) {
+        const v = fc.precipitation[fi]
         if (v != null) {
           mm = v
           mmSrc = 'forecast'
+          snowCm = fc.snowfall?.[fi] ?? null
         }
-        prob = fc.precipitation_probability[i] ?? null
+        prob = fc.precipitation_probability[fi] ?? null
       }
+    } else if (mm > 0) {
+      // Naměřená voda → odhad sněhu podle skupenství v modelu, jinak podle teploty
+      const fm = fi != null && fc ? (fc.precipitation[fi] ?? 0) : 0
+      const fs = fi != null && fc ? (fc.snowfall?.[fi] ?? null) : null
+      const share =
+        fm >= 0.1
+          ? precipPhase(fm, fs) === 'rain'
+            ? 0
+            : snowShare(fm, fs)
+          : (T.get(t + HOUR) ?? T.get(t) ?? Infinity) <= 0.5
+            ? 1
+            : 0
+      if (share > 0) snowCm = Math.round(mm * share * SNOW_CM_PER_MM * 100) / 100
     }
-    hours.push({ t, temp, tempSrc, modelTemp, mm, mmSrc, prob })
+    hours.push({ t, temp, tempSrc, modelTemp, mm, mmSrc, snowCm, prob })
   }
 
   const measured: [number, number | null][] = []

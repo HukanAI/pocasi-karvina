@@ -21,6 +21,7 @@
   --warm: #ea580c;
   --cold: #0284c7;
   --rain: #2563eb;
+  --snow: #7c3aed;
   --chart-grid: rgb(15 23 42 / 0.08);
   --nav-bg: rgb(255 255 255 / 0.72);
   color-scheme: light;
@@ -39,6 +40,7 @@
   --warm: #fb923c;
   --cold: #38bdf8;
   --rain: #60a5fa;
+  --snow: #c4b5fd;
   --chart-grid: rgb(255 255 255 / 0.08);
   --nav-bg: rgb(2 6 23 / 0.6);
   color-scheme: dark;

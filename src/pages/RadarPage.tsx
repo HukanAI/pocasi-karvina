@@ -14,6 +14,7 @@ import { Card, ErrorCard, LoadingCard, SourceNote } from '../components/ui.tsx'
 import { CHMI_STATION, LOCATION } from '../config.ts'
 import { num } from '../lib/format.ts'
 import { CHMI_DATA_BOUNDS, type GeoBounds, mercY, type RadarIndex } from '../lib/radarData.ts'
+import { formatPrecip, phaseOfTotals } from '../lib/snow.ts'
 import { dbzToMmh, LEGEND_DBZ_RANGE, LEGEND_MMH, legendGradient, mmhToDbz, recolorRainViewer } from '../lib/radarPalette.ts'
 import { formatAgo, formatMoment, formatTime, HOUR, MINUTE } from '../lib/time.ts'
 import { useNow } from '../state/derived.ts'
@@ -463,15 +464,16 @@ function ModelOutlook() {
     if (!f.data) return []
     const m = f.data.minutely15
     return m.time
-      .map((t, i) => ({ start: t - 15 * MINUTE, end: t, mm: m.precipitation[i] }))
+      .map((t, i) => ({ start: t - 15 * MINUTE, end: t, mm: m.precipitation[i], ...(m.snowfall?.[i] ? { snowCm: m.snowfall[i]! } : {}) }))
       .filter((x): x is PrecipBar => x.mm != null && x.end > now && x.start < now + 6 * HOUR)
   }, [f.data, now])
   if (!bars.length) return null
-  const total = bars.reduce((s, x) => s + x.mm, 0)
+  const tot = phaseOfTotals(bars)
+  const total = tot.mm
   return (
     <Card title="Srážky na 6 hodin přímo v Karviné" subtitle="Po 15 minutách (model ICON-D2, stejný jako na záložce Dnes)">
       <PrecipBars bars={bars} height={80} />
-      <p className="mt-2 text-sm">{total < 0.1 ? 'V příštích 6 hodinách bez srážek.' : `Celkem asi ${num(total, 1)} mm za 6 hodin.`}</p>
+      <p className="mt-2 text-sm">{total < 0.1 ? 'V příštích 6 hodinách bez srážek.' : `Celkem asi ${formatPrecip(total, tot.snowCm, { water: true })} za 6 hodin.`}</p>
     </Card>
   )
 }

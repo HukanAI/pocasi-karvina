@@ -54,7 +54,8 @@ export interface Forecast {
   /** Okamžik platnosti aktuálních hodnot (ms) */
   currentTime: number
   current: Record<CurrentVar, number | null>
-  minutely15: { time: number[]; precipitation: Arr }
+  /** snowfall (cm) chybí v datech uložených starší verzí aplikace */
+  minutely15: { time: number[]; precipitation: Arr; snowfall?: Arr }
   hourly: { time: number[] } & Record<HourlyVar, Arr>
   daily: { time: number[] } & Record<DailyVar, Arr>
   elevation: number
@@ -67,7 +68,7 @@ export const FORECAST_PAST_DAYS = 7
 interface RawForecast {
   elevation: number
   current: Record<string, number | null> & { time: number }
-  minutely_15: { time: number[]; precipitation: Arr }
+  minutely_15: { time: number[]; precipitation: Arr; snowfall?: Arr }
   hourly: Record<string, Arr> & { time: number[] }
   daily: Record<string, Arr> & { time: number[] }
 }
@@ -75,7 +76,7 @@ interface RawForecast {
 export async function fetchForecast(signal?: AbortSignal): Promise<Forecast> {
   const url =
     `${API.forecast}?${base()}&current=${CURRENT.join(',')}&hourly=${HOURLY.join(',')}&daily=${DAILY.join(',')}` +
-    `&minutely_15=precipitation&past_minutely_15=96&forecast_minutely_15=96&past_days=${FORECAST_PAST_DAYS}&forecast_days=16`
+    `&minutely_15=precipitation,snowfall&past_minutely_15=96&forecast_minutely_15=96&past_days=${FORECAST_PAST_DAYS}&forecast_days=16`
   const r = await getJson<RawForecast>(url, signal)
   const { time: ct, ...current } = r.current
   const hourly = { ...r.hourly, time: ms(r.hourly.time) } as Forecast['hourly']
@@ -86,7 +87,7 @@ export async function fetchForecast(signal?: AbortSignal): Promise<Forecast> {
   return {
     currentTime: ct * 1000,
     current: current as Forecast['current'],
-    minutely15: { time: ms(r.minutely_15.time), precipitation: r.minutely_15.precipitation },
+    minutely15: { time: ms(r.minutely_15.time), precipitation: r.minutely_15.precipitation, snowfall: r.minutely_15.snowfall },
     hourly,
     daily,
     elevation: r.elevation,

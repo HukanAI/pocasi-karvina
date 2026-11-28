@@ -11,14 +11,19 @@ const dir = fileURLToPath(new URL('.', import.meta.url))
 const src = readFileSync(`${dir}WeatherIcon.tsx`, 'utf8')
 const bundled = new Set(/fill\/all\/\{([^}]+)\}\.svg/.exec(src)![1].split(','))
 
-/** Všechny literály <WeatherIcon name="…"> ve zdrojových souborech */
+/** Všechny literály <WeatherIcon name="…"> (i v podmínce name={…}) ve zdrojových souborech */
 function literalIconNames(): string[] {
   const root = fileURLToPath(new URL('..', import.meta.url))
   const out: string[] = []
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       if (e.isDirectory()) walk(`${d}${e.name}/`)
-      else if (/\.tsx$/.test(e.name)) for (const m of readFileSync(`${d}${e.name}`, 'utf8').matchAll(/WeatherIcon name="([a-z-]+)"/g)) out.push(m[1])
+      else if (/\.tsx$/.test(e.name)) {
+        const text = readFileSync(`${d}${e.name}`, 'utf8')
+        // name="snowflake" i podmíněné name={snow ? 'snowflake' : 'raindrop'}
+        for (const m of text.matchAll(/WeatherIcon name="([a-z-]+)"/g)) out.push(m[1])
+        for (const m of text.matchAll(/WeatherIcon name=\{([^}]*)\}/g)) for (const q of m[1].matchAll(/'([a-z-]+)'/g)) out.push(q[1])
+      }
     }
   }
   walk(root)

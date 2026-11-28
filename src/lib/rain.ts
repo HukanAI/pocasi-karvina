@@ -186,6 +186,8 @@ export interface HourChance {
   t: number
   prob: number | null
   mm: number | null
+  /** Nový sníh v té hodině (cm) */
+  snowCm?: number | null
 }
 
 /**
@@ -211,22 +213,28 @@ export interface Quarter {
   /** Začátek a konec 15min intervalu (ms) */
   start: number
   end: number
+  /** Srážky jako voda (mm) */
   mm: number
+  /** Z toho nový sníh (cm), pokud model sníh udává */
+  snowCm?: number
 }
 
 /** Čtvrthodiny od té právě probíhající na 2 hodiny dopředu (Open-Meteo: čas = konec intervalu) */
-export function nowcastQuarters(time: number[], precip: (number | null)[], now: number): Quarter[] {
+export function nowcastQuarters(time: number[], precip: (number | null)[], now: number, snowfall?: (number | null)[]): Quarter[] {
   const out: Quarter[] = []
   time.forEach((t, i) => {
-    if (t > now && t - Q < now + NOWCAST_HORIZON && precip[i] != null) out.push({ start: t - Q, end: t, mm: precip[i]! })
+    if (t > now && t - Q < now + NOWCAST_HORIZON && precip[i] != null) {
+      const sn = snowfall?.[i]
+      out.push({ start: t - Q, end: t, mm: precip[i]!, ...(sn != null && sn > 0 ? { snowCm: sn } : {}) })
+    }
   })
   return out.sort((a, b) => a.start - b.start)
 }
 
 export type NowcastSummary =
   | { kind: 'dry'; until: number }
-  | { kind: 'starts'; at: number; total: number; until: number }
-  | { kind: 'ongoing'; dryAt: number | null; total: number; until: number }
+  | { kind: 'starts'; at: number; total: number; snowTotal: number; until: number }
+  | { kind: 'ongoing'; dryAt: number | null; total: number; snowTotal: number; until: number }
 
 /** Co říká výhled na 2 hodiny – jedna funkce pro kartu „Srážky v příštích 2 hodinách“ i „Bez deště“ */
 export function nowcastSummary(q: Quarter[]): NowcastSummary | null {
@@ -234,9 +242,10 @@ export function nowcastSummary(q: Quarter[]): NowcastSummary | null {
   const until = q[q.length - 1].end
   const wet = (x: Quarter) => x.mm >= WET_MIN_MM - EPS
   const total = q.reduce((a, x) => a + x.mm, 0)
-  if (wet(q[0])) return { kind: 'ongoing', dryAt: q.find((x) => !wet(x))?.start ?? null, total, until }
+  const snowTotal = q.reduce((a, x) => a + (x.snowCm ?? 0), 0)
+  if (wet(q[0])) return { kind: 'ongoing', dryAt: q.find((x) => !wet(x))?.start ?? null, total, snowTotal, until }
   const first = q.find(wet)
-  return first ? { kind: 'starts', at: first.start, total, until } : { kind: 'dry', until }
+  return first ? { kind: 'starts', at: first.start, total, snowTotal, until } : { kind: 'dry', until }
 }
 
 /** Slovní intenzita srážek podle mm/h */

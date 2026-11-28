@@ -4,6 +4,7 @@
 
 import { type PointerEvent, useEffect, useRef, useState } from 'react'
 import { num } from '../../lib/format.ts'
+import { formatPrecip, precipPhase } from '../../lib/snow.ts'
 import type { Timeline, TimelineHour } from '../../lib/stationTimeline.ts'
 import { formatTime, formatWeekdayShort, HOUR, localParts } from '../../lib/time.ts'
 import type { ChartColors } from '../charts/chartTheme.ts'
@@ -69,6 +70,10 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
   const y = (v: number) => TOP + ((tMax - v) / (tMax - tMin)) * (BOTTOM - TOP)
 
   const maxMm = Math.max(0, ...hours.map((h) => h.mm ?? 0))
+  // Sníh má vlastní barvu; výška sloupce je vždy voda (mm), aby šly hodiny porovnat
+  const isSnowy = (h: TimelineHour) => h.mm != null && h.mm > 0 && precipPhase(h.mm, h.snowCm) !== 'rain'
+  const barColor = (h: TimelineHour) => (h.mm != null && precipPhase(h.mm, h.snowCm) === 'snow' ? c.snow : h.mm != null && isSnowy(h) ? `url(#mix)` : c.rain)
+  const anySnow = hours.some(isSnowy)
   const mmScale = maxMm <= 1 ? 1 : Math.ceil(maxMm)
   const barMaxH = (BOTTOM - TOP) * 0.55
   const barH = (mm: number) => (mm / mmScale) * barMaxH
@@ -91,8 +96,8 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
 
   return (
     <div>
-      {/* Odečet: pevná výška dvou řádků, aby graf při tažení neposkakoval */}
-      <div className="tabular mb-1 h-8 text-[11px] leading-4" aria-live="polite">
+      {/* Odečet: pevná výška tří řádků (u sněhu a v úzkém detailu dne se řádky zalamují), graf při tažení neposkakuje */}
+      <div className="tabular mb-1 h-12 overflow-hidden text-[11px] leading-4" aria-live="polite">
         {s ? (
           <>
             <div className="font-semibold">
@@ -106,8 +111,9 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
               )}
               {!same && <span className="text-muted"> {srcWord(s.tempSrc)}</span>}
               <span className="text-muted"> · </span>
-              <span style={{ color: c.rain }}>
-                {formatTime(s.t).slice(0, 2)}–{formatTime(s.t + HOUR).slice(0, 2)} h: {s.mm != null ? `${num(s.mm, 1)} mm` : '–'}
+              <span style={{ color: isSnowy(s) ? c.snow : c.rain }}>
+                {formatTime(s.t).slice(0, 2)}–{formatTime(s.t + HOUR).slice(0, 2)} h:{' '}
+                {s.mm != null ? formatPrecip(s.mm, s.snowCm, { water: true, approx: s.mmSrc === 'measured' }) : '–'}
               </span>
               {s.prob != null && <span style={{ color: c.rain }}> · {num(s.prob, 0)} %</span>}
               {!same && <span className="text-muted"> {srcWord(s.mmSrc)}</span>}
@@ -134,6 +140,13 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
         onPointerLeave={(e) => e.pointerType === 'mouse' && setSel(null)}
       >
         <svg width={W} height={HEIGHT} role="img" aria-label={label} className="block">
+          <defs>
+            {/* Déšť se sněhem: dolní polovina déšť, horní sníh */}
+            <linearGradient id="mix" x1="0" x2="0" y1="1" y2="0">
+              <stop offset="50%" stopColor={c.rain} />
+              <stop offset="50%" stopColor={c.snow} />
+            </linearGradient>
+          </defs>
           {/* Oblast předpovědi */}
           {nowIn && <rect x={nowX} y={TOP - 4} width={Math.max(0, x(to) - nowX)} height={STRIP_Y + STRIP_H - TOP + 4} fill={c.text} opacity={0.04} />}
           {/* Mřížka a popisky teploty */}
@@ -169,7 +182,7 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
                 y={BOTTOM - Math.max(1.5, barH(h.mm))}
                 height={Math.max(1.5, barH(h.mm))}
                 rx={1.5}
-                fill={c.rain}
+                fill={barColor(h)}
                 opacity={sel === i ? 1 : h.mmSrc === 'measured' ? 0.85 : 0.38}
               />
             ) : null,
@@ -240,6 +253,12 @@ export function TimelineChart({ tl, c, label = 'Teplota a srážky za posledníc
           <span className="inline-block h-2 w-1.5 rounded-sm" style={{ background: c.rain, opacity: 0.38 }} />
           srážky za hodinu
         </span>
+        {anySnow && (
+          <span className="flex items-center gap-1">
+            <span className="inline-block h-2 w-1.5 rounded-sm" style={{ background: c.snow }} />
+            sníh
+          </span>
+        )}
         <span className="flex items-center gap-1">
           <span className="inline-block h-1.5 w-4 rounded-sm" style={{ background: `linear-gradient(90deg, transparent, ${c.rain})` }} />
           pravděpodobnost srážek

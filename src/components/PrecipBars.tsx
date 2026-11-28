@@ -1,17 +1,23 @@
 // Sloupcový graf srážek ovladatelný prstem: klepnutí nebo tažení po sloupcích ukáže čas, množství a intenzitu.
 // Atribut title na telefonu nefunguje, proto vlastní odečet nad grafem.
+// Sníh má vlastní barvu a množství v cm nového sněhu; výška sloupce je vždy voda (mm), aby šly porovnat.
 
 import { type PointerEvent, useState } from 'react'
 import { num } from '../lib/format.ts'
-import { intensityWord, WET_MIN_MM } from '../lib/rain.ts'
+import { WET_MIN_MM } from '../lib/rain.ts'
+import { formatPrecip, precipFill, precipPhase, precipWord } from '../lib/snow.ts'
 import { formatTime, HOUR } from '../lib/time.ts'
 
 export interface PrecipBar {
   /** Začátek a konec intervalu (ms) */
   start: number
   end: number
+  /** Srážky jako voda (mm) */
   mm: number
+  /** Z toho nový sníh (cm) */
+  snowCm?: number
 }
+
 
 export function PrecipBars({ bars, values = false, height = 64 }: { bars: PrecipBar[]; values?: boolean; height?: number }) {
   const [sel, setSel] = useState<number | null>(null)
@@ -25,16 +31,19 @@ export function PrecipBars({ bars, values = false, height = 64 }: { bars: Precip
     setSel(Math.min(bars.length - 1, Math.max(0, i)))
   }
   const b = sel != null ? bars[sel] : null
+  const maxBar = bars.reduce((a, x) => (x.mm > a.mm ? x : a), bars[0])
+  const anySnow = bars.some((x) => x.mm >= WET_MIN_MM && precipPhase(x.mm, x.snowCm) !== 'rain')
   return (
     <div>
       <div className="mb-1 h-4 text-[11px] leading-4" aria-live="polite">
         {b ? (
           <span className="tabular font-medium">
-            {formatTime(b.start)}–{formatTime(b.end)} · {num(b.mm, 1)} mm · {intensityWord((b.mm * HOUR) / (b.end - b.start))}
+            {formatTime(b.start)}–{formatTime(b.end)} · {formatPrecip(b.mm, b.snowCm, { water: true })} · {precipWord((b.mm * HOUR) / (b.end - b.start), precipPhase(b.mm, b.snowCm))}
           </span>
         ) : (
           <span className="text-faint">
-            Klepněte na sloupec{maxMm >= WET_MIN_MM ? ` · nejvíc ${num(maxMm, 1)} mm` : ''}
+            Klepněte na sloupec{maxMm >= WET_MIN_MM ? ` · nejvíc ${formatPrecip(maxBar.mm, maxBar.snowCm)}` : ''}
+            {anySnow ? ' · fialově sníh' : ''}
           </span>
         )}
       </div>
@@ -53,16 +62,16 @@ export function PrecipBars({ bars, values = false, height = 64 }: { bars: Precip
               key={x.start}
               type="button"
               className="relative h-full flex-1 rounded-t-md focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
-              aria-label={`${formatTime(x.start)}–${formatTime(x.end)}: ${num(x.mm, 1)} mm`}
+              aria-label={`${formatTime(x.start)}–${formatTime(x.end)}: ${formatPrecip(x.mm, x.snowCm)}`}
               onFocus={() => setSel(i)}
             >
               <span
-                className="absolute inset-x-0 bottom-0 rounded-t-md bg-[var(--rain)] transition-opacity"
-                style={{ height: `${pct}%`, opacity: sel === i ? 1 : wet ? (sel == null ? 0.9 : 0.6) : 0.25 }}
+                className="absolute inset-x-0 bottom-0 rounded-t-md transition-opacity"
+                style={{ height: `${pct}%`, background: precipFill(x.mm, x.snowCm), opacity: sel === i ? 1 : wet ? (sel == null ? 0.9 : 0.6) : 0.25 }}
               />
               {values && wet && (
                 <span className="tabular absolute inset-x-0 text-center text-[9px] font-medium text-muted" style={{ bottom: `calc(${pct}% + 1px)` }}>
-                  {num(x.mm, 1)}
+                  {precipPhase(x.mm, x.snowCm) === 'snow' ? num(x.snowCm, 1) : num(x.mm, 1)}
                 </span>
               )}
             </button>

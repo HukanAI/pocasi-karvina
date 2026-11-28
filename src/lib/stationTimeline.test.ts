@@ -133,3 +133,31 @@ describe('blendTemps a lastTempObs', () => {
     expect(lastTempObs(null)).toBeNull()
   })
 })
+
+describe('sníh v časové ose', () => {
+  it('předpověď: cm sněhu z modelu', () => {
+    const fc = forecast()
+    fc.snowfall = fc.time.map((t) => (t === at('2026-11-22T18:00Z') ? 0.28 : 0))
+    const tl = buildTimeline(station(), fc, now)
+    expect(tl.hours.find((h) => h.t === at('2026-11-22T17:00Z'))).toMatchObject({ mm: 0.4, mmSrc: 'forecast', snowCm: 0.28 })
+  })
+
+  it('měření: odhad sněhu podle modelu pro tutéž hodinu', () => {
+    const fc = forecast()
+    // Model v hodině 12–13 sněžil (0,5 mm → 0,35 cm)
+    fc.precipitation = fc.time.map((t) => (t === at('2026-11-22T13:00Z') ? 0.5 : 0))
+    fc.snowfall = fc.time.map((t) => (t === at('2026-11-22T13:00Z') ? 0.35 : 0))
+    const h = buildTimeline(station(), fc, now).hours.find((x) => x.t === at('2026-11-22T12:00Z'))!
+    expect(h).toMatchObject({ mm: 0.6, mmSrc: 'measured' })
+    expect(h.snowCm).toBeCloseTo(0.42, 5) // 0,6 mm × 0,7
+  })
+
+  it('měření: model suchý → podle teploty stanice', () => {
+    const warm = buildTimeline(station(), forecast(), now).hours.find((x) => x.t === at('2026-11-22T12:00Z'))!
+    expect(warm.snowCm).toBeNull() // 5 °C
+    const st = station()
+    st.T = st.T.map((v) => (v == null ? null : -2))
+    const cold = buildTimeline(st, forecast(), now).hours.find((x) => x.t === at('2026-11-22T12:00Z'))!
+    expect(cold.snowCm).toBeCloseTo(0.42, 5)
+  })
+})

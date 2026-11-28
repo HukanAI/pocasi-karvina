@@ -11,6 +11,8 @@ export interface ChartColors {
   warm: string
   cold: string
   rain: string
+  /** Sníh – odlišný od deště */
+  snow: string
   accent: string
   tooltipBg: string
   tooltipBorder: string
@@ -28,6 +30,7 @@ export function useChartColors(): ChartColors {
             warm: '#fb923c',
             cold: '#38bdf8',
             rain: '#60a5fa',
+            snow: '#c4b5fd',
             accent: '#60a5fa',
             tooltipBg: 'rgba(15,23,42,0.92)',
             tooltipBorder: 'rgba(255,255,255,0.12)',
@@ -39,6 +42,7 @@ export function useChartColors(): ChartColors {
             warm: '#ea580c',
             cold: '#0284c7',
             rain: '#2563eb',
+            snow: '#7c3aed',
             accent: '#2563eb',
             tooltipBg: 'rgba(255,255,255,0.96)',
             tooltipBorder: 'rgba(15,23,42,0.1)',

@@ -9,9 +9,10 @@ import { Card, ErrorCard, LoadingCard, Segmented, SourceNote, StaleNote } from '
 import { TimelineChart } from '../components/today/TimelineChart.tsx'
 import { WeatherIcon } from '../components/WeatherIcon.tsx'
 import { MODELS } from '../config.ts'
-import { kmh, mm, num, tempShort, uvLabel, windDir } from '../lib/format.ts'
+import { kmh, num, tempShort, uvLabel, windDir } from '../lib/format.ts'
 import { mean } from '../lib/stats.ts'
 import { DAY, formatDayMonth, formatDuration, formatTime, formatWeekdayLong, formatWeekdayShort, localDateKey } from '../lib/time.ts'
+import { formatPrecip } from '../lib/snow.ts'
 import { buildTimeline } from '../lib/stationTimeline.ts'
 import { dayCode, wmoIcon, wmoLabel } from '../lib/wmo.ts'
 import { useNow, useTodayRange } from '../state/derived.ts'
@@ -63,7 +64,7 @@ function OverviewChart({ f, days, tmax, tmin }: { f: Forecast; days: { t: number
         formatter: (ps: unknown) => {
           const k = (ps as { dataIndex: number }[])[0].dataIndex
           const { t, i } = days[k]
-          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(dayCode(f, i))}<br/>max ${tempShort(tmax(k, i))}, min ${tempShort(tmin(k, i))}<br/>srážky ${mm(d.precipitation_sum[i])} (${num(d.precipitation_probability_max[i], 0)} %)`
+          return `<b>${dayName(t, k)} ${formatDayMonth(t)}</b><br/>${wmoLabel(dayCode(f, i))}<br/>max ${tempShort(tmax(k, i))}, min ${tempShort(tmin(k, i))}<br/>srážky ${formatPrecip(d.precipitation_sum[i], d.snowfall_sum[i], { water: true })} (${num(d.precipitation_probability_max[i], 0)} %)`
         },
       },
       xAxis: { type: 'category', data: days.map(({ t }, k) => (k < 2 ? dayName(t, k) : `${formatWeekdayShort(t)}\n${formatDayMonth(t)}`)), ...axisStyle(c), axisLabel: { color: c.muted, fontSize: 9, interval: 1 } },
@@ -140,7 +141,7 @@ function DailyList({ f, updatedAt, error }: { f: Forecast; updatedAt: number; er
                           <Drop />
                           {num(prob, 0)} %
                         </div>
-                        {sum != null && sum >= 0.1 && <div className="mt-0.5 text-muted">{num(sum, 1)} mm</div>}
+                        {sum != null && sum >= 0.1 && <div className="mt-0.5 text-muted">{formatPrecip(sum, d.snowfall_sum[i], { short: true })}</div>}
                       </>
                     ) : (
                       <span className="text-faint">–</span>
@@ -182,8 +183,8 @@ function DayDetail({ f, dayIndex }: { f: Forecast; dayIndex: number }) {
   const rows: [string, string][] = [
     ['Stav', wmoLabel(dayCode(f, dayIndex))],
     ['Pocitová teplota', `${tempShort(d.apparent_temperature_min[dayIndex])} až ${tempShort(d.apparent_temperature_max[dayIndex])}`],
-    ['Srážky', `${mm(d.precipitation_sum[dayIndex])} · ${num(d.precipitation_hours[dayIndex], 0)} h · ${num(d.precipitation_probability_max[dayIndex], 0)} %`],
-    ...(d.snowfall_sum[dayIndex] ? [['Nový sníh', `${num(d.snowfall_sum[dayIndex], 1)} cm`] as [string, string]] : []),
+    // Sníh v cm nového sněhu (s vodou v závorce), déšť v mm
+    ['Srážky', `${formatPrecip(d.precipitation_sum[dayIndex], d.snowfall_sum[dayIndex], { water: true })} · ${num(d.precipitation_hours[dayIndex], 0)} h · ${num(d.precipitation_probability_max[dayIndex], 0)} %`],
     ['Vítr', `${kmh(d.wind_speed_10m_max[dayIndex])} ${windDir(d.wind_direction_10m_dominant[dayIndex])}, nárazy ${kmh(d.wind_gusts_10m_max[dayIndex])}`],
     ['Sluneční svit', d.sunshine_duration[dayIndex] != null ? formatDuration(d.sunshine_duration[dayIndex]! * 1000) : '–'],
     ['UV index', `${num(d.uv_index_max[dayIndex], 0)} (${uvLabel(d.uv_index_max[dayIndex])})`],
